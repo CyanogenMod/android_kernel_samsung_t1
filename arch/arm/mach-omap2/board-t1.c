@@ -322,7 +322,7 @@ static void __init t1_reserve(void)
 	omap_reserve();
 }
 
-MACHINE_START(OMAP4_SAMSUNG, "T1 Samsung board")
+MACHINE_START(OMAP4_SAMSUNG, "t1")
 	/* Maintainer: Shankar Bandal Samsung India (shankar.b@samsung.com) */
 	.boot_params	= 0x80000100,
 	.reserve	= t1_reserve,
