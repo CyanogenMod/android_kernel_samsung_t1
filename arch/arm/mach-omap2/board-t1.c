@@ -263,7 +263,6 @@ static void __init t1_init(void)
 	omap4_t1_power_init();
 	omap4_t1_jack_init();
 	omap4_t1_wifi_init();
-	omap4_t1_vibrator_init();
 	omap4_t1_fmradio_init();
 	omap4_t1_reboot_init();
 	omap4_t1_cam_init();
