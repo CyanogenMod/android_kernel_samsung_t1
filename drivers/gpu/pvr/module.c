@@ -103,7 +103,6 @@
 #include "private_data.h"
 #include "lock.h"
 #include "linkage.h"
-#include "buffer_manager.h"
 
 #if defined(SUPPORT_DRI_DRM)
 #include "pvr_drm.h"
@@ -147,6 +146,18 @@ module_param(sgx_idle_timeout, uint, 0644);
 
 uint sgx_apm_latency = SYS_SGX_ACTIVE_POWER_LATENCY_MS;
 module_param(sgx_apm_latency, uint, 0644);
+
+void set_sgx_apm_latency(uint new_sgx_apm_latency)
+{
+	sgx_apm_latency =  new_sgx_apm_latency;
+}
+EXPORT_SYMBOL(set_sgx_apm_latency);
+
+uint get_sgx_apm_latency(void)
+{
+	return sgx_apm_latency;
+}
+EXPORT_SYMBOL(get_sgx_apm_latency);
 
 #if defined(CONFIG_ION_OMAP)
 #include <linux/ion.h>
@@ -378,7 +389,7 @@ PVR_MOD_STATIC void PVRSRVDriverShutdown(LDM_DEV *pDevice)
 
 	if (atomic_dec_and_test(&sDriverIsShutdown))
 	{
-		
+
 		LinuxLockMutex(&gPVRSRVLock);
 
 		(void) PVRSRVSetPowerStateKM(PVRSRV_SYS_POWER_STATE_D3);
@@ -570,12 +581,6 @@ static int PVRSRVRelease(struct inode unref__ * pInode, struct file *pFile)
 				PVR_DPF((PVR_DBG_ERROR, "%s: Failed to look up export handle", __FUNCTION__));
 				err = -EFAULT;
 				goto err_unlock;
-			}
-
-			
-			if (psKernelMemInfo->sShareMemWorkaround.bInUse)
-			{
-				BM_XProcIndexRelease(psKernelMemInfo->sShareMemWorkaround.ui32ShareIndex);
 			}
 
 			

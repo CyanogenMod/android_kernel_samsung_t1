@@ -26,6 +26,7 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 #include <linux/opp.h>
+#include <linux/pm_qos_params.h>
 
 #include "smartreflex.h"
 #include "voltage.h"
@@ -53,6 +54,7 @@
  *			case oscillations. filled by the notifier and
  *			consumed by the work item.
  * @work_active:	have we scheduled a work item?
+ * @qos:		pm qos handle
  */
 struct sr_class1p5_work_data {
 	struct delayed_work work;
@@ -62,6 +64,7 @@ struct sr_class1p5_work_data {
 	u8 num_osc_samples;
 	unsigned long u_volt_samples[SR1P5_STABLE_SAMPLES];
 	bool work_active;
+	struct pm_qos_request_list qos;
 };
 
 #if CONFIG_OMAP_SR_CLASS1P5_RECALIBRATION_DELAY
@@ -138,7 +141,7 @@ static void sr_class1p5_calib_work(struct work_struct *work)
 {
 	struct sr_class1p5_work_data *work_data =
 	    container_of(work, struct sr_class1p5_work_data, work.work);
-	unsigned long u_volt_safe = 0, u_volt_current = 0, u_volt_margin = 0;
+	unsigned long u_volt_safe = 0, u_volt_current = 0, u_volt_margin;
 	struct omap_volt_data *volt_data;
 	struct voltagedomain *voltdm;
 	int idx = 0;
@@ -167,6 +170,8 @@ static void sr_class1p5_calib_work(struct work_struct *work)
 	if (unlikely(!work_data->work_active)) {
 		pr_err("%s:%s unplanned work invocation!\n", __func__,
 		       voltdm->name);
+		/* No expectation of calibration, remove qos req */
+		pm_qos_update_request(&work_data->qos, PM_QOS_DEFAULT_VALUE);
 		mutex_unlock(&omap_dvfs_lock);
 		return;
 	}
@@ -260,6 +265,10 @@ stop_sampling:
 		if (work_data->u_volt_samples[idx] > u_volt_safe)
 			u_volt_safe = work_data->u_volt_samples[idx];
 	}
+	/* Use the nominal voltage as the safe voltage to recover bad osc */
+	if (u_volt_safe > volt_data->volt_nominal)
+		u_volt_safe = volt_data->volt_nominal;
+
 
 	/* Fall through to close up common stuff */
 done_calib:
@@ -285,16 +294,16 @@ done_calib:
 		} else {
 			u_volt_margin = volt_data->volt_margin;
 		}
-
-		u_volt_safe += u_volt_margin;
-	}
-
-	if (u_volt_safe > volt_data->volt_nominal) {
-		pr_warning("%s: %s Vsafe %ld > Vnom %d. %ld[%d] margin on"
-			"vnom %d curr_v=%ld\n", __func__, voltdm->name,
-			u_volt_safe, volt_data->volt_nominal, u_volt_margin,
-			volt_data->volt_margin, volt_data->volt_nominal,
-			u_volt_current);
+		/* Add margin IF we are lower than nominal */
+		if ((u_volt_safe + u_volt_margin) < volt_data->volt_nominal) {
+			u_volt_safe += u_volt_margin;
+		} else {
+			pr_err("%s: %s could not add %ld[%d] margin"
+				"to vnom %d curr_v=%ld\n",
+				__func__, voltdm->name, u_volt_margin,
+				volt_data->volt_margin, volt_data->volt_nominal,
+				u_volt_current);
+		}
 	}
 
 	volt_data->volt_calibrated = u_volt_safe;
@@ -311,8 +320,8 @@ done_calib:
 		voltdm_scale(voltdm, volt_data);
 	}
 
-	pr_info("%s: %s: Calibration complete: Voltage:Nominal=%d,"
-		"Calib=%d,margin=%d\n",
+	pr_info("%s: %s: Calibration complete: Voltage Nominal=%d"
+		"Calib=%d margin=%d\n",
 		 __func__, voltdm->name, volt_data->volt_nominal,
 		 volt_data->volt_calibrated, volt_data->volt_margin);
 	/*
@@ -323,6 +332,8 @@ done_calib:
 	 * vc_setup_on_voltage(voltdm, volt_data->volt_calibrated);
 	 */
 	work_data->work_active = false;
+	/* Calibration done, Remove qos req */
+	pm_qos_update_request(&work_data->qos, PM_QOS_DEFAULT_VALUE);
 	mutex_unlock(&omap_dvfs_lock);
 }
 
@@ -437,6 +448,8 @@ static int sr_class1p5_enable(struct voltagedomain *voltdm,
 	work_data->vdata = volt_data;
 	work_data->work_active = true;
 	work_data->num_calib_triggers = 0;
+	/* Dont interrupt me untill calibration is complete */
+	pm_qos_update_request(&work_data->qos, 1);
 	/* program the workqueue and leave it to calibrate offline.. */
 	schedule_delayed_work(&work_data->work,
 			      msecs_to_jiffies(SR1P5_SAMPLING_DELAY_MS *
@@ -505,6 +518,8 @@ static int sr_class1p5_disable(struct voltagedomain *voltdm,
 		sr_disable_errgen(voltdm);
 		omap_vp_disable(voltdm);
 		sr_disable(voltdm);
+		/* Cancelled SR, so no more need to keep request */
+		pm_qos_update_request(&work_data->qos, PM_QOS_DEFAULT_VALUE);
 	}
 
 	/* If already calibrated, don't need to reset voltage */
@@ -572,6 +587,8 @@ static int sr_class1p5_init(struct voltagedomain *voltdm,
 	work_data->voltdm = voltdm;
 	INIT_DELAYED_WORK_DEFERRABLE(&work_data->work, sr_class1p5_calib_work);
 	*voltdm_cdata = (void *)work_data;
+	pm_qos_add_request(&work_data->qos, PM_QOS_CPU_DMA_LATENCY,
+			  PM_QOS_DEFAULT_VALUE);
 
 	return 0;
 }
@@ -620,6 +637,7 @@ static int sr_class1p5_deinit(struct voltagedomain *voltdm,
 	cancel_delayed_work_sync(&work_data->work);
 	omap_voltage_calib_reset(voltdm);
 	voltdm_reset(voltdm);
+	pm_qos_remove_request(&work_data->qos);
 
 	*voltdm_cdata = NULL;
 	kfree(work_data);

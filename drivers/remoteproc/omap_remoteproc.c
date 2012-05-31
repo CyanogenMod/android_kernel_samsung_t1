@@ -22,6 +22,7 @@
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 #include <linux/sched.h>
+#include <linux/rproc_drm.h>
 
 #include <plat/iommu.h>
 #include <plat/omap_device.h>
@@ -32,6 +33,7 @@
 #include <plat/dmtimer.h>
 #include "../../arch/arm/mach-omap2/dvfs.h"
 #include "../../arch/arm/mach-omap2/clockdomain.h"
+#include "../gpu/pvr/omap4/sysconfig.h"
 
 #define PM_SUSPEND_MBOX		0xffffff07
 #define PM_SUSPEND_TIMEOUT	300
@@ -446,9 +448,13 @@ static inline int omap_rproc_start(struct rproc *rproc, u64 bootaddr)
 	int ret = 0;
 
 	if (rproc->secure_mode) {
-		pr_err("TODO: Call secure service to authenticate\n");
-		if (ret)
+		rproc->secure_reset = true;
+		ret = rproc_drm_invoke_service(rproc->secure_mode);
+		if (ret) {
+			dev_err(rproc->dev, "rproc_drm_invoke_service failed "
+					"for secure_enable ret = 0x%x\n", ret);
 			return -ENXIO;
+		}
 	}
 
 #ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
@@ -509,9 +515,18 @@ static inline int omap_rproc_stop(struct rproc *rproc)
 	struct omap_rproc_pdata *pdata = dev->platform_data;
 	struct omap_rproc_timers_info *timers = pdata->timers;
 	int ret, i;
+
 #ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
 	_destroy_pm_flags(rproc);
 #endif
+	if (rproc->secure_reset) {
+		ret = rproc_drm_invoke_service(false);
+		if (ret)
+			dev_err(rproc->dev, "rproc_drm_invoke_service failed "
+					"for secure disable ret = 0x%x\n", ret);
+		rproc->secure_reset = false;
+	}
+
 	ret = omap_device_idle(pdev);
 	if (ret)
 		goto err;

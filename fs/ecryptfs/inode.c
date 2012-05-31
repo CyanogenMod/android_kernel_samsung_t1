@@ -269,10 +269,43 @@ static int ecryptfs_initialize_file(struct dentry *ecryptfs_dentry)
 			ecryptfs_dentry->d_name.name, rc);
 		goto out;
 	}
+#ifdef CONFIG_WTL_ENCRYPTION_FILTER
+	mutex_lock(&crypt_stat->cs_mutex);
+	if (crypt_stat->flags & ECRYPTFS_ENCRYPTED) {
+		struct dentry *fp_dentry =
+			ecryptfs_inode_to_private(ecryptfs_dentry->d_inode)
+			->lower_file->f_dentry;
+		struct ecryptfs_mount_crypt_stat *mount_crypt_stat =
+			&ecryptfs_superblock_to_private(ecryptfs_dentry->d_sb)
+			->mount_crypt_stat;
+		char filename[NAME_MAX+1] = {0};
+		if (fp_dentry->d_name.len <= NAME_MAX)
+			memcpy(filename, fp_dentry->d_name.name,
+					fp_dentry->d_name.len + 1);
+
+		if ((mount_crypt_stat->flags & ECRYPTFS_ENABLE_NEW_PASSTHROUGH)
+		|| ((mount_crypt_stat->flags & ECRYPTFS_ENABLE_FILTERING) &&
+			(is_file_name_match(mount_crypt_stat, fp_dentry) ||
+			is_file_ext_match(mount_crypt_stat, filename)))) {
+			crypt_stat->flags &= ~(ECRYPTFS_I_SIZE_INITIALIZED
+				| ECRYPTFS_ENCRYPTED);
+			ecryptfs_put_lower_file(ecryptfs_dentry->d_inode);
+		} else {
+			rc = ecryptfs_write_metadata(ecryptfs_dentry);
+			if (rc)
+				printk(
+				KERN_ERR "Error writing headers; rc = [%d]\n"
+				    , rc);
+			ecryptfs_put_lower_file(ecryptfs_dentry->d_inode);
+		}
+	}
+	mutex_unlock(&crypt_stat->cs_mutex);
+#else
 	rc = ecryptfs_write_metadata(ecryptfs_dentry);
 	if (rc)
 		printk(KERN_ERR "Error writing headers; rc = [%d]\n", rc);
 	ecryptfs_put_lower_file(ecryptfs_dentry->d_inode);
+#endif
 out:
 	return rc;
 }
@@ -854,6 +887,18 @@ static int truncate_upper(struct dentry *dentry, struct iattr *ia,
 		size_t num_zeros = (PAGE_CACHE_SIZE
 				    - (ia->ia_size & ~PAGE_CACHE_MASK));
 
+
+		/*
+		 * XXX(truncate) this should really happen at the begginning
+		 * of ->setattr.  But the code is too messy to that as part
+		 * of a larger patch.  ecryptfs is also totally missing out
+		 * on the inode_change_ok check at the beginning of
+		 * ->setattr while would include this.
+		 */
+		rc = inode_newsize_ok(inode, ia->ia_size);
+		if (rc)
+			goto out;
+
 		if (!(crypt_stat->flags & ECRYPTFS_ENCRYPTED)) {
 			truncate_setsize(inode, ia->ia_size);
 			lower_ia->ia_size = ia->ia_size;
@@ -903,28 +948,6 @@ out:
 	return rc;
 }
 
-static int ecryptfs_inode_newsize_ok(struct inode *inode, loff_t offset)
-{
-	struct ecryptfs_crypt_stat *crypt_stat;
-	loff_t lower_oldsize, lower_newsize;
-
-	crypt_stat = &ecryptfs_inode_to_private(inode)->crypt_stat;
-	lower_oldsize = upper_size_to_lower_size(crypt_stat,
-						 i_size_read(inode));
-	lower_newsize = upper_size_to_lower_size(crypt_stat, offset);
-	if (lower_newsize > lower_oldsize) {
-		/*
-		 * The eCryptfs inode and the new *lower* size are mixed here
-		 * because we may not have the lower i_mutex held and/or it may
-		 * not be appropriate to call inode_newsize_ok() with inodes
-		 * from other filesystems.
-		 */
-		return inode_newsize_ok(inode, lower_newsize);
-	}
-
-	return 0;
-}
-
 /**
  * ecryptfs_truncate
  * @dentry: The ecryptfs layer dentry
@@ -940,10 +963,6 @@ int ecryptfs_truncate(struct dentry *dentry, loff_t new_length)
 	struct iattr ia = { .ia_valid = ATTR_SIZE, .ia_size = new_length };
 	struct iattr lower_ia = { .ia_valid = 0 };
 	int rc;
-
-	rc = ecryptfs_inode_newsize_ok(dentry->d_inode, new_length);
-	if (rc)
-		return rc;
 
 	rc = truncate_upper(dentry, &ia, &lower_ia);
 	if (!rc && lower_ia.ia_valid & ATTR_SIZE) {
@@ -1026,16 +1045,6 @@ static int ecryptfs_setattr(struct dentry *dentry, struct iattr *ia)
 		}
 	}
 	mutex_unlock(&crypt_stat->cs_mutex);
-
-	rc = inode_change_ok(inode, ia);
-	if (rc)
-		goto out;
-	if (ia->ia_valid & ATTR_SIZE) {
-		rc = ecryptfs_inode_newsize_ok(inode, ia->ia_size);
-		if (rc)
-			goto out;
-	}
-
 	if (S_ISREG(inode->i_mode)) {
 		rc = filemap_write_and_wait(inode->i_mapping);
 		if (rc)
@@ -1119,8 +1128,6 @@ ecryptfs_setxattr(struct dentry *dentry, const char *name, const void *value,
 	}
 
 	rc = vfs_setxattr(lower_dentry, name, value, size, flags);
-	if (!rc)
-		fsstack_copy_attr_all(dentry->d_inode, lower_dentry->d_inode);
 out:
 	return rc;
 }

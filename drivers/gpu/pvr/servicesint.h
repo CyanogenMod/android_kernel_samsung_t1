@@ -33,7 +33,6 @@ extern "C" {
 
 #include "services.h"
 #include "sysinfo.h"
-#include "sysconfig.h"
 
 #define HWREC_DEFAULT_TIMEOUT	(500)
 
@@ -47,10 +46,6 @@ extern "C" {
 #ifndef MIN
 #define MIN(a,b) 					(((a) < (b)) ? (a) : (b))
 #endif
-
-#define MAX_CLEANUP_TIME_US			(MAX_HW_TIME_US * 4)
-#define MAX_CLEANUP_TRYS			100
-#define MAX_CLEANUP_TIME_WAIT_US	(MAX_CLEANUP_TIME_US/MAX_CLEANUP_TRYS)
 
 typedef enum _PVRSRV_MEMTYPE_
 {
@@ -149,7 +144,7 @@ typedef struct _PVRSRV_KERNEL_SYNC_INFO_
 
 	
 	
-	IMG_PVOID              pvRefCount;
+	IMG_UINT32              ui32RefCount;
 
 	
 	IMG_HANDLE hResItem;
@@ -345,6 +340,16 @@ IMG_IMPORT
 PVRSRV_ERROR PVRSRVQueueCommand(IMG_HANDLE hQueueInfo,
 								PVRSRV_COMMAND *psCommand);
 
+
+
+IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
+PVRSRVGetMMUContextPDDevPAddr(const PVRSRV_CONNECTION *psConnection,
+#if defined (SUPPORT_SID_INTERFACE)
+                              IMG_SID hDevMemContext,
+#else
+                              IMG_HANDLE hDevMemContext,
+#endif
+                              IMG_DEV_PHYADDR *sPDDevPAddr);
 
 IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
 PVRSRVAllocSharedSysMem(const PVRSRV_CONNECTION *psConnection,

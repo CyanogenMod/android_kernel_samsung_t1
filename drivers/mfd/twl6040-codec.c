@@ -329,7 +329,7 @@ static int twl6040_power_up_completion(struct twl6040 *twl6040,
 	do {
 		gpio_set_value(twl6040->audpwron, 1);
 		time_left = wait_for_completion_timeout(&twl6040->ready,
-							msecs_to_jiffies(144));
+							msecs_to_jiffies(700));
 		if (!time_left) {
 			intid = twl6040_reg_read(twl6040, TWL6040_REG_INTID);
 			if (!(intid & TWL6040_READYINT)) {
@@ -422,6 +422,20 @@ static int twl6040_power(struct twl6040 *twl6040, int enable)
 				return ret;
 			}
 		}
+
+		/* Errata: PDMCLK can fail to generate at cold temperatures
+		 * The workaround consists of resetting HPPLL and LPPLL
+		 * after Sleep/Deep-Sleep mode and before application mode.
+		 */
+		twl6040_set_bits(twl6040, TWL6040_REG_HPPLLCTL,
+				TWL6040_HPLLRST);
+		twl6040_clear_bits(twl6040, TWL6040_REG_HPPLLCTL,
+				TWL6040_HPLLRST);
+		twl6040_set_bits(twl6040, TWL6040_REG_LPPLLCTL,
+				TWL6040_LPLLRST);
+		twl6040_clear_bits(twl6040, TWL6040_REG_LPPLLCTL,
+				TWL6040_LPLLRST);
+
 		twl6040->pll = TWL6040_LPPLL_ID;
 		twl6040->sysclk = 19200000;
 	} else {

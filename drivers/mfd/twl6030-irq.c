@@ -92,6 +92,8 @@ static struct task_struct *task;
 static struct completion irq_event;
 static atomic_t twl6030_wakeirqs = ATOMIC_INIT(0);
 
+static u8 vbatmin_hi_threshold;
+
 static int twl6030_irq_pm_notifier(struct notifier_block *notifier,
 				   unsigned long pm_event, void *unused)
 {
@@ -191,16 +193,16 @@ static int twl6030_irq_thread(void *data)
 		local_irq_enable();
 		}
 
-		/*
-		 * NOTE:
-		 * Simulation confirms that documentation is wrong w.r.t the
-		 * interrupt status clear operation. A single *byte* write to
-		 * any one of STS_A to STS_C register results in all three
-		 * STS registers being reset. Since it does not matter which
-		 * value is written, all three registers are cleared on a
-		 * single byte write, so we just use 0x0 to clear.
-		 */
-		ret = twl_i2c_write_u8(TWL_MODULE_PIH, 0x00, REG_INT_STS_A);
+		/* NOTE:
+		* Simulation confirms that documentation is wrong w.r.t the
+		* interrupt status clear operation. A single *byte* write to
+		* any one of STS_A to STS_C register results in all three
+		* STS registers being reset. Since it does not matter which
+		* value is written, all three registers are cleared on a
+		* single byte write, so we just use 0x0 to clear.
+		*/
+		ret = twl_i2c_write_u8(TWL_MODULE_PIH, 0x00,
+				REG_INT_STS_A);
 		if (ret)
 			pr_warning("twl6030: I2C error in clearing PIH ISR\n");
 
@@ -232,8 +234,15 @@ static irqreturn_t handle_twl6030_pih(int irq, void *devid)
  */
 static irqreturn_t handle_twl6030_vlow(int irq, void *unused)
 {
-	pr_info("handle_twl6030_vlow: kernel_power_off()\n");
+	pr_err("twl6030: BAT_VLOW interrupt; threshold=%dmV\n",
+	       2300 + (vbatmin_hi_threshold - 0b110) * 50);
+
+#if 1 /* temporary */
+	WARN_ON_ONCE(1);
+#else
+	pr_emerg("handle_twl6030_vlow: kernel_power_off()\n");
 	kernel_power_off();
+#endif
 	return IRQ_HANDLED;
 }
 
@@ -336,6 +345,15 @@ int twl6030_mmc_card_detect_config(void)
 									ret);
 		return ret;
 	}
+
+	ret = twl_i2c_write_u8(TWL6030_MODULE_ID0, MMC_MEXT_DEB_MASK,
+						TWL6030_MMCDEBOUNCING);
+	if (ret < 0) {
+		pr_err("twl16030: Failed to write MMC_MEXT_DEB_MASK %d\n",
+								ret);
+		return ret;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(twl6030_mmc_card_detect_config);
@@ -415,6 +433,9 @@ int twl6030_vlow_init(int vlow_irq)
 				status);
 		return status;
 	}
+
+	twl_i2c_read_u8(TWL_MODULE_PM_MASTER, &vbatmin_hi_threshold,
+			TWL6030_VBATMIN_HI_THRESHOLD);
 
 	/* install an irq handler for vlow */
 	status = request_threaded_irq(vlow_irq, NULL, handle_twl6030_vlow,

@@ -246,6 +246,7 @@ enum rproc_event {
  * @secure_restart: completion event notifier for the secure restart process
  * @secure_mode: flag to dictate whether to enable secure loading
  * @secure_ok: restart status flag to be looked up upon the event's completion
+ * @secure_reset: flag to uninstall the firewalls
  */
 struct rproc {
 	struct list_head next;
@@ -284,6 +285,7 @@ struct rproc {
 	struct mutex secure_lock;
 	bool secure_mode;
 	bool secure_ok;
+	bool secure_reset;
 	bool halt_on_crash;
 	char *header;
 	int header_len;

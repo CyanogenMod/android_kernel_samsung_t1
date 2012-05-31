@@ -42,7 +42,7 @@
 #include <mach/tiler.h>
 #include <plat/omap-pm.h>
 #include <video/omapdss.h>
-
+#include <../mach-omap2/powerdomain.h>
 #include "../clockdomain.h"
 #include "dss.h"
 #include "dss_features.h"
@@ -522,6 +522,7 @@ static u32 dispc_calculate_threshold(enum omap_plane plane, u32 paddr,
 int dispc_runtime_get(void)
 {
 	int r;
+	struct powerdomain *dss_powerdomain = pwrdm_lookup("dss_pwrdm");
 
 	mutex_lock(&dispc.runtime_lock);
 
@@ -556,6 +557,11 @@ int dispc_runtime_get(void)
 			clkdm_deny_idle(l3_1_clkdm);
 			clkdm_deny_idle(l3_2_clkdm);
 		}
+
+		/* Removes latency constraint */
+		omap_pm_set_max_dev_wakeup_lat(&dispc.pdev->dev,
+			&dispc.pdev->dev,
+			dss_powerdomain->wakeup_lat[PWRDM_FUNC_PWRST_ON]);
 
 		r = dss_runtime_get();
 		if (r)
@@ -595,6 +601,13 @@ void dispc_runtime_put(void)
 		DSSDBG("dispc_runtime_put\n");
 
 		dispc_save_context();
+		/* Sets DSS max latency constraint
+		* * (allowing for deeper power state)
+		* */
+		 omap_pm_set_max_dev_wakeup_lat(
+			 &dispc.pdev->dev,
+			&dispc.pdev->dev,
+			-1);
 
 		r = pm_runtime_put_sync(&dispc.pdev->dev);
 		WARN_ON(r);
@@ -874,6 +887,7 @@ dispc_get_scaling_coef(u32 inc, bool five_taps)
 	};
 
 	inc >>= 7;	/* /= 128 */
+
 	if (five_taps) {
 		if (inc > 26)
 			return coef_M32;
@@ -1457,16 +1471,11 @@ static void _dispc_set_scale_param(enum omap_plane plane,
 		enum omap_color_component color_comp)
 {
 	int fir_hinc, fir_vinc;
-	int hscaleup, vscaleup;
-
-	hscaleup = orig_width <= out_width;
-	vscaleup = orig_height <= out_height;
-
-	_dispc_set_scale_coef(plane, hscaleup, vscaleup, five_taps, color_comp);
 
 	fir_hinc = 1024 * orig_width / out_width;
 	fir_vinc = 1024 * orig_height / out_height;
 
+	_dispc_set_scale_coef(plane, fir_hinc, fir_vinc, five_taps, color_comp);
 	_dispc_set_fir(plane, fir_hinc, fir_vinc, color_comp);
 }
 
@@ -1480,9 +1489,8 @@ static void _dispc_set_scaling_common(enum omap_plane plane,
 	int accu0 = 0;
 	int accu1 = 0;
 	u32 l;
-	u16 y_adjust = color_mode == OMAP_DSS_COLOR_NV12 ? 2 : 0;
 
-	_dispc_set_scale_param(plane, orig_width, orig_height - y_adjust,
+	_dispc_set_scale_param(plane, orig_width, orig_height,
 				out_width, out_height, five_taps,
 				rotation, DISPC_COLOR_COMPONENT_RGB_Y);
 	l = dispc_read_reg(DISPC_OVL_ATTRIBUTES(plane));
@@ -1534,7 +1542,6 @@ static void _dispc_set_scaling_uv(enum omap_plane plane,
 {
 	int scale_x = out_width != orig_width;
 	int scale_y = out_height != orig_height;
-	u16 y_adjust = 0;
 
 	if (!dss_has_feature(FEAT_HANDLE_UV_SEPARATE))
 		return;
@@ -1551,7 +1558,6 @@ static void _dispc_set_scaling_uv(enum omap_plane plane,
 		orig_height >>= 1;
 		/* UV is subsampled by 2 horz.*/
 		orig_width >>= 1;
-		y_adjust = 1;
 		break;
 	case OMAP_DSS_COLOR_YUV2:
 	case OMAP_DSS_COLOR_UYVY:
@@ -1575,7 +1581,7 @@ static void _dispc_set_scaling_uv(enum omap_plane plane,
 	if (out_height != orig_height)
 		scale_y = true;
 
-	_dispc_set_scale_param(plane, orig_width, orig_height - y_adjust,
+	_dispc_set_scale_param(plane, orig_width, orig_height,
 			out_width, out_height, five_taps,
 				rotation, DISPC_COLOR_COMPONENT_UV);
 
@@ -1660,6 +1666,9 @@ static void _dispc_set_rotation_attrs(enum omap_plane plane, u8 rotation,
 			row_repeat = true;
 		else
 			row_repeat = false;
+	} else if (color_mode == OMAP_DSS_COLOR_NV12) {
+		/* WA for OMAP4+ UV plane overread HW bug */
+		vidrot = 1;
 	}
 
 	REG_FLD_MOD(DISPC_OVL_ATTRIBUTES(plane), vidrot, 13, 12);
@@ -2521,6 +2530,7 @@ static void dispc_enable_lcd_out(enum omap_channel channel, bool enable)
 
 		r = omap_dispc_unregister_isr(dispc_disable_isr,
 				&frame_done_completion, irq);
+		synchronize_irq(dispc.irq);
 
 		if (r)
 			DSSERR("failed to unregister FRAMEDONE isr\n");
@@ -2582,6 +2592,8 @@ static void dispc_enable_digit_out(enum omap_display_type type, bool enable)
 			&frame_done_completion,
 			DISPC_IRQ_EVSYNC_EVEN | DISPC_IRQ_EVSYNC_ODD
 						| DISPC_IRQ_FRAMEDONETV);
+	synchronize_irq(dispc.irq);
+
 	if (r)
 		DSSERR("failed to unregister EVSYNC isr\n");
 
@@ -3734,8 +3746,8 @@ static void dispc_error_worker(struct work_struct *work)
 			mgr = omap_dss_get_overlay_manager(i);
 
 			if (mgr->id == OMAP_DSS_CHANNEL_LCD) {
-				if(!mgr->device->first_vsync){
-					DSSERR("First SYNC_LOST.. ignoring \n");
+				if (!mgr->device->first_vsync) {
+					DSSERR("First SYNC_LOST.. ignoring\n");
 					break;
 				}
 
@@ -3778,9 +3790,8 @@ static void dispc_error_worker(struct work_struct *work)
 			mgr = omap_dss_get_overlay_manager(i);
 
 			if (mgr->id == OMAP_DSS_CHANNEL_DIGIT) {
-				if(!mgr->device->first_vsync){
+				if (!mgr->device->first_vsync)
 					DSSERR("First SYNC_LOST..TV ignoring\n");
-				}
 
 				manager = mgr;
 				enable = mgr->device->state ==
@@ -3823,15 +3834,14 @@ static void dispc_error_worker(struct work_struct *work)
 			mgr = omap_dss_get_overlay_manager(i);
 
 			if (mgr->id == OMAP_DSS_CHANNEL_LCD2) {
-				if(!mgr->device->first_vsync){
-					DSSERR("First SYNC_LOST.. ignoring \n");
-					break;
-				}
-
+				if (!mgr->device->first_vsync)
+					DSSERR("First SYNC_LOST.. ignoring\n");
 				manager = mgr;
 				enable = mgr->device->state ==
 						OMAP_DSS_DISPLAY_ACTIVE;
+				mgr->device->sync_lost_error = 1;
 				mgr->device->driver->disable(mgr->device);
+				mgr->device->sync_lost_error = 0;
 				break;
 			}
 		}
@@ -3895,6 +3905,8 @@ int omap_dispc_wait_for_irq_timeout(u32 irqmask, unsigned long timeout)
 
 	omap_dispc_unregister_isr(dispc_irq_wait_handler, &completion, irqmask);
 
+	synchronize_irq(dispc.irq);
+
 	if (timeout == 0)
 		return -ETIMEDOUT;
 
@@ -3929,6 +3941,8 @@ int omap_dispc_wait_for_irq_interruptible_timeout(u32 irqmask,
 			timeout);
 
 	omap_dispc_unregister_isr(dispc_irq_wait_handler, &completion, irqmask);
+
+	synchronize_irq(dispc.irq);
 
 	if (timeout == 0)
 		r = -ETIMEDOUT;
@@ -4098,9 +4112,9 @@ static int omap_dispchw_probe(struct platform_device *pdev)
 	rev = dispc_read_reg(DISPC_REVISION);
 	dev_dbg(&pdev->dev, "OMAP DISPC rev %d.%d\n",
 	       FLD_GET(rev, 7, 4), FLD_GET(rev, 3, 0));
-
+#ifndef CONFIG_FB_OMAP_BOOTLOADER_INIT
 	dispc_runtime_put();
-
+#endif
 	return 0;
 
 err_runtime_get:
@@ -4143,3 +4157,16 @@ void dispc_uninit_platform_driver(void)
 {
 	return platform_driver_unregister(&omap_dispchw_driver);
 }
+
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+int dispc_l3_clkdm_deny_idle(void)
+{
+
+	if (cpu_is_omap44xx()) {
+		clkdm_deny_idle(l3_1_clkdm);
+		clkdm_deny_idle(l3_2_clkdm);
+	}
+	return 0;
+}
+late_initcall(dispc_l3_clkdm_deny_idle);
+#endif

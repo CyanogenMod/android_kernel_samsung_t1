@@ -28,9 +28,13 @@
 #ifndef __OMAP_HSI_H__
 #define __OMAP_HSI_H__
 
-/* Set the HSI Functional Clock to 96MHz.
- * This is to ensure HSI will function even at OPP50. */
-#define HSI_DEFAULT_FCLK		96000000	/* 96 MHz */
+#define HSI_FCLK_LOW_SPEED		96000000	/* 96 MHz */
+#define HSI_FCLK_HI_SPEED		192000000	/* 192 MHz */
+#define HSI_FCLK_DPLL_CASCADING		98300000        /* 98.3 MHz */
+
+/* Set the HSI Functional Clock to 96MHzi.
+ * Warning : 192MHz will force OPP100 on VDD_CORE (no OPP50 possible) */
+#define HSI_DEFAULT_FCLK		HSI_FCLK_LOW_SPEED	/* 96 MHz */
 
 
 #define HSI_PORT_OFFSET			0x1000
@@ -135,10 +139,11 @@
 #define HSI_SSI_WAKE_MASK		0xff	/* for SSI */
 #define HSI_WAKE_MASK			0xffff	/* for HSI */
 #define HSI_SET_WAKE_4_WIRES		(0 << 16)
+#define HSI_SET_WAKE_3_WIRES		(1 << 16)
+#define HSI_SET_WAKE_3_WIRES_MASK	0xfffcffff /* 3-wires + ACREADY to 1 */
 #define HSI_SET_WAKE_READY_LVL_0	(0 << 17)
-#define HSI_SET_WAKE(channel)		(1 << (channel) |\
-						HSI_SET_WAKE_4_WIRES |\
-						HSI_SET_WAKE_READY_LVL_0)
+#define HSI_SET_WAKE_READY_LVL_1	(1 << 17)
+#define HSI_SET_WAKE(channel)		(1 << (channel))
 #define HSI_CLEAR_WAKE(channel)		(1 << (channel))
 #define HSI_WAKE(channel)		(1 << (channel))
 
@@ -259,6 +264,11 @@
 #define HSI_HSR_ERROR_TBE		(1 << 4)	/* HSI only */
 #define HSI_HSR_ERROR_RME		(1 << 7)	/* HSI only */
 #define HSI_HSR_ERROR_TME		(1 << 11)	/* HSI only */
+#define HSI_HSR_ERROR_ALL		(HSI_HSR_ERROR_SIG |    \
+					 HSI_HSR_ERROR_FTE |    \
+					 HSI_HSR_ERROR_TBE |    \
+					 HSI_HSR_ERROR_RME |    \
+					 HSI_HSR_ERROR_TME)
 
 #define HSI_HSR_ERRORACK_REG(port)	(HSI_HSR_BASE(port) + 0x0024)
 
@@ -268,6 +278,7 @@
 
 #define HSI_HSR_OVERRUNACK_REG(port)	(HSI_HSR_BASE(port) + 0x0030)
 
+/* HSR_COUNTERS_Pp is former SSI_TIMEOUT_REG */
 #define HSI_HSR_COUNTERS_REG(port)	(HSI_HSR_BASE(port) + 0x0034)
 #define SSI_TIMEOUT_REG(port)		(HSI_HSR_COUNTERS_REG(port))
 #define HSI_TIMEOUT_DEFAULT		0	/* SSI only */
@@ -282,11 +293,14 @@
 /* Default FT value: 2 x max_bits_per_frame + 20% margin */
 #define HSI_COUNTERS_FT_DEFAULT		(90 << HSI_COUNTERS_FT_OFFSET)
 #define HSI_COUNTERS_TB_DEFAULT		(6 << HSI_COUNTERS_TB_OFFSET)
-#define HSI_COUNTERS_FB_DEFAULT		(8 << HSI_COUNTERS_FB_OFFSET)
+/* Default FB value: 256 consecutives frames */
+#define HSI_COUNTERS_FB_DEFAULT		(0xFF << HSI_COUNTERS_FB_OFFSET)
+
 #define HSI_HSR_COMBINE_COUNTERS(FB, TB, FT)				  \
 		(((FB << HSI_COUNTERS_FB_OFFSET) & HSI_COUNTERS_FB_MASK) \
 		 ((TB << HSI_COUNTERS_TB_OFFSET) & HSI_COUNTERS_TB_MASK) \
 		 ((FT << HSI_COUNTERS_FT_OFFSET) & HSI_COUNTERS_FT_MASK))
+/* For SSI */
 #define SSI_SSR_COMBINE_COUNTERS(FT)				  \
 		((FT << HSI_SSI_RX_TIMEOUT_OFFSET) & HSI_SSI_RX_TIMEOUT_MASK)
 
@@ -354,7 +368,7 @@
 #define HSI_DST_BURST_EN_MASK		0xc000
 #define HSI_DST_SINGLE_ACCESS0		0
 #define HSI_DST_SINGLE_ACCESS		(1 << 14)
-#define HSI_DST_BURST_4X32_BIT		(2 << 14)
+#define HSI_DST_BURST_4x32_BIT		(2 << 14)
 #define HSI_DST_BURST_8x32_BIT		(3 << 14)
 
 #define HSI_DST_MASK			0x1e00
@@ -454,9 +468,34 @@
 				HSI_SYS_MPU_U_ENABLE_REG(port, irq))
 
 #define HSI_SYS_MPU_STATUS_CH_REG(port, irq, channel)      \
-			      ((channel < HSI_SSI_CHANNELS_MAX) ?    \
+			      (((channel) < HSI_SSI_CHANNELS_MAX) ?    \
 			      HSI_SYS_MPU_STATUS_REG(port, irq) :    \
 			      HSI_SYS_MPU_U_STATUS_REG(port, irq))
+
+
+/* HSI errata handling */
+#define IS_HSI_ERRATA(errata, id)		(errata & (id))
+#define SET_HSI_ERRATA(errata, id)		(errata |= (id))
+
+/* HSI-C1BUG00088: i696: HSI: Issue with SW reset
+ * No recovery from SW reset under specific circumstances
+ * If a SW RESET is done while some HSI errors are still not
+ * acknowledged, the HSR FSM is stucked. */
+#define HSI_ERRATUM_i696_SW_RESET_FSM_STUCK		BIT(0)
+
+/* HSI-C1BUG00085: ixxx: HSI wakeup issue in 3 wires mode
+ * HSI will NOT generate the Swakeup for 2nd frame if it entered
+ * IDLE after 1st received frame */
+#define HSI_ERRATUM_ixxx_3WIRES_NO_SWAKEUP		BIT(1)
+
+/*
+* HSI - OMAP4430-2.2BUG00055: i702
+* HSI: DSP Swakeup generated is the same than MPU Swakeup.
+* System cannot enter in off mode due to the DSP.
+*/
+#define HSI_ERRATUM_i702_PM_HSI_SWAKEUP			BIT(2)
+
+
 /**
  *	struct omap_ssi_config - SSI board configuration
  *	@num_ports: Number of ports in use
@@ -479,16 +518,17 @@ extern int omap_hsi_config(struct omap_hsi_board_config *hsi_config);
 
 #ifdef CONFIG_OMAP_HSI
 extern int omap_hsi_prepare_suspend(int hsi_port, bool dev_may_wakeup);
-extern int omap_hsi_prepare_idle(void);
+extern int omap_hsi_io_wakeup_check(void);
 extern int omap_hsi_wakeup(int hsi_port);
-extern int omap_hsi_is_io_wakeup_from_hsi(void);
+extern bool omap_hsi_is_io_wakeup_from_hsi(int *hsi_port);
+extern void omap_hsi_allow_registration(void);
 #else
 inline int omap_hsi_prepare_suspend(int hsi_port,
 					bool dev_may_wakeup) { return -ENOSYS; }
-inline int omap_hsi_prepare_idle(void) { return -ENOSYS; }
+inline int omap_hsi_io_wakeup_check(void) { return -ENOSYS; }
 inline int omap_hsi_wakeup(int hsi_port) { return -ENOSYS; }
-inline int omap_hsi_is_io_wakeup_from_hsi(void) { return -ENOSYS; }
-
+inline bool omap_hsi_is_io_wakeup_from_hsi(int *hsi_port) { return false; }
+inline void omap_hsi_allow_registration(void) { return -ENOSYS; }
 #endif
 
 #endif /* __OMAP_HSI_H__ */

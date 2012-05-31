@@ -136,10 +136,30 @@ int voltdm_scale(struct voltagedomain *voltdm,
 			OMAP_VOLTAGE_PRECHANGE,
 			(void *)&notify);
 
-	ret = voltdm->scale(voltdm, target_v);
-	if (ret)
-		pr_err("%s: voltage scale failed for vdd%s: %d\n",
-			__func__, voltdm->name, ret);
+	if (voltdm->abb) {
+		ret = omap_ldo_abb_pre_scale(voltdm, target_volt);
+		if (ret)
+			pr_err("%s: ABB prescale failed for vdd%s: %d\n",
+				__func__, voltdm->name, ret);
+		/* Fall through */
+	}
+
+	if (!ret) {
+		ret = voltdm->scale(voltdm, target_v);
+		if (ret)
+			pr_err("%s: voltage scale failed for vdd%s: %d\n",
+				__func__, voltdm->name, ret);
+
+		if (voltdm->abb) {
+			unsigned long cv;
+			cv = omap_get_operation_voltage(voltdm->curr_volt);
+			ret = omap_ldo_abb_post_scale(voltdm, cv);
+			if (ret)
+				pr_err("%s: ABB postscale fail for vdd%s:%d\n",
+					__func__, voltdm->name, ret);
+		}
+		/* Fall through */
+	}
 
 	notify.op_result = ret;
 	srcu_notifier_call_chain(&voltdm->change_notify_list,
@@ -241,7 +261,8 @@ struct omap_volt_data *omap_voltage_get_voltdata(struct voltagedomain *voltdm,
 	}
 
 	for (i = 0; vdd->volt_data[i].volt_nominal != 0; i++) {
-		if (vdd->volt_data[i].volt_nominal == volt)
+		if (vdd->volt_data[i].volt_nominal == volt ||
+		   omap_get_operation_voltage(&vdd->volt_data[i]) == volt)
 			return &vdd->volt_data[i];
 	}
 
@@ -364,28 +385,6 @@ static int calib_volt_debug_get(void *data, u64 *val)
 }
 DEFINE_SIMPLE_ATTRIBUTE(calib_volt_debug_fops, calib_volt_debug_get, NULL,
 								"%llu\n");
-static int margin_volt_debug_get(void *data, u64 *val)
-{
-	struct voltagedomain *voltdm = (struct voltagedomain *) data;
-	struct omap_volt_data *vdata;
-
-	if (!voltdm) {
-		pr_warning("%s: Wrong parameter passed\n", __func__);
-		return -EINVAL;
-	}
-
-	vdata = omap_voltage_get_curr_vdata(voltdm);
-	if (IS_ERR_OR_NULL(vdata)) {
-		pr_warning("%s: unable to get volt for vdd_%s\n",
-			   __func__, voltdm->name);
-		return -ENODEV;
-	}
-	*val = vdata->volt_margin;
-
-	return 0;
-}
-DEFINE_SIMPLE_ATTRIBUTE(margin_volt_debug_fops, margin_volt_debug_get, NULL,
-								"%llu\n");
 
 static int nom_volt_debug_get(void *data, u64 *val)
 {
@@ -442,9 +441,6 @@ static void __init voltdm_debugfs_init(struct dentry *voltage_dir,
 	(void) debugfs_create_file("curr_calibrated_volt", S_IRUGO,
 				voltdm->debug_dir, (void *) voltdm,
 				&calib_volt_debug_fops);
-	(void) debugfs_create_file("curr_margin_volt", S_IRUGO,
-				voltdm->debug_dir, (void *) voltdm,
-				&margin_volt_debug_fops);
 }
 
 /**

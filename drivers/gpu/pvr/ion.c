@@ -43,9 +43,10 @@
 
 extern struct ion_client *gpsIONClient;
 
-void PVRSRVExportFDToIONHandles(int fd, struct ion_client **client,
-								struct ion_handle *handles[2])
+struct ion_handle *
+PVRSRVExportFDToIONHandle(int fd, struct ion_client **client)
 {
+	struct ion_handle *psIONHandle = IMG_NULL;
 	PVRSRV_FILE_PRIVATE_DATA *psPrivateData;
 	PVRSRV_KERNEL_MEM_INFO *psKernelMemInfo;
 	LinuxMemArea *psLinuxMemArea;
@@ -88,8 +89,7 @@ void PVRSRVExportFDToIONHandles(int fd, struct ion_client **client,
 		goto err_fput;
 	}
 
-	handles[0] = psLinuxMemArea->uData.sIONTilerAlloc.psIONHandle[0];
-	handles[1] = psLinuxMemArea->uData.sIONTilerAlloc.psIONHandle[1];
+	psIONHandle = psLinuxMemArea->uData.sIONTilerAlloc.psIONHandle;
 	if(client)
 		*client = gpsIONClient;
 
@@ -98,15 +98,7 @@ err_fput:
 err_unlock:
 	/* Allow PVRSRV clients to communicate with srvkm again */
 	LinuxUnLockMutex(&gPVRSRVLock);
+	return psIONHandle;
 }
 
-struct ion_handle *
-PVRSRVExportFDToIONHandle(int fd, struct ion_client **client)
-{
-	struct ion_handle *psHandles[2] = { IMG_NULL, IMG_NULL };
-	PVRSRVExportFDToIONHandles(fd, client, psHandles);
-	return psHandles[0];
-}
-
-EXPORT_SYMBOL(PVRSRVExportFDToIONHandles);
 EXPORT_SYMBOL(PVRSRVExportFDToIONHandle);

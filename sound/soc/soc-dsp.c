@@ -410,7 +410,6 @@ static int soc_dsp_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 			dev_err(&be->dev, "BE open failed %d\n", err);
 			be->dsp[stream].users--;
 			be->dsp[stream].state = SND_SOC_DSP_STATE_CLOSE;
-			be_substream->runtime = NULL;
 			goto unwind;
 		}
 		be->dsp[stream].state = SND_SOC_DSP_STATE_OPEN;
@@ -1116,7 +1115,7 @@ static int dsp_run_new_update(struct snd_soc_pcm_runtime *fe, int stream)
 	ret = dsp_run_update_startup(fe, stream);
 	if (ret < 0)
 		dev_err(&fe->dev, "failed to startup some BEs\n");
-        fe->dsp[stream].runtime_update = SND_SOC_DSP_UPDATE_NO;
+	fe->dsp[stream].runtime_update = SND_SOC_DSP_UPDATE_NO;
 
 	return ret;
 }

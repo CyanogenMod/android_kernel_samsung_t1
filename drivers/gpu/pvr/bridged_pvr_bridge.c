@@ -863,7 +863,18 @@ PVRSRVMapDeviceMemoryBW(IMG_UINT32 ui32BridgeID,
 	{
 		PVR_DPF((PVR_DBG_MESSAGE, "using the mem wrap workaround."));
 
-		
+		/* Check the XPROC mapping count -if it is "0",
+		 * then the object is about to go away - do not allow mapping */
+		if(BM_XProcGetShareDataRefCount(psSrcKernelMemInfo->sShareMemWorkaround.ui32ShareIndex) < 1)
+		{
+			psMapDevMemOUT->eError = PVRSRV_ERROR_MAPPING_NOT_FOUND;
+			PVR_DPF((PVR_DBG_WARNING, "%s: Can't map buffer with slot %d, size %d "
+					"and refcount %d\n\t Invalid XPROC refcount of %d",
+				__FUNCTION__, psSrcKernelMemInfo->sShareMemWorkaround.ui32ShareIndex,
+				psSrcKernelMemInfo->uAllocSize, psSrcKernelMemInfo->ui32RefCount,
+				BM_XProcGetShareDataRefCount(psSrcKernelMemInfo->sShareMemWorkaround.ui32ShareIndex)));
+			return 0;
+		}
 
 
 
@@ -3568,6 +3579,40 @@ PVRSRVMapMemInfoMemBW(IMG_UINT32 ui32BridgeID,
 
 
 
+static IMG_INT
+MMU_GetPDDevPAddrBW(IMG_UINT32 ui32BridgeID,
+					PVRSRV_BRIDGE_IN_GETMMU_PD_DEVPADDR *psGetMmuPDDevPAddrIN,
+					PVRSRV_BRIDGE_OUT_GETMMU_PD_DEVPADDR *psGetMmuPDDevPAddrOUT,
+					PVRSRV_PER_PROCESS_DATA *psPerProc)
+{
+	IMG_HANDLE hDevMemContextInt;
+
+	PVRSRV_BRIDGE_ASSERT_CMD(ui32BridgeID, PVRSRV_BRIDGE_GETMMU_PD_DEVPADDR);
+
+	psGetMmuPDDevPAddrOUT->eError =
+		PVRSRVLookupHandle(psPerProc->psHandleBase, &hDevMemContextInt,
+						   psGetMmuPDDevPAddrIN->hDevMemContext,
+						   PVRSRV_HANDLE_TYPE_DEV_MEM_CONTEXT);
+	if(psGetMmuPDDevPAddrOUT->eError != PVRSRV_OK)
+	{
+		return 0;
+	}
+
+	psGetMmuPDDevPAddrOUT->sPDDevPAddr =
+		BM_GetDeviceNode(hDevMemContextInt)->pfnMMUGetPDDevPAddr(BM_GetMMUContextFromMemContext(hDevMemContextInt));
+	if(psGetMmuPDDevPAddrOUT->sPDDevPAddr.uiAddr)
+	{
+		psGetMmuPDDevPAddrOUT->eError = PVRSRV_OK;
+	}
+	else
+	{
+		psGetMmuPDDevPAddrOUT->eError = PVRSRV_ERROR_INVALID_PHYS_ADDR;
+	}
+	return 0;
+}
+
+
+
 IMG_INT
 DummyBW(IMG_UINT32 ui32BridgeID,
 		IMG_VOID *psBridgeIn,
@@ -4028,7 +4073,6 @@ static PVRSRV_ERROR ModifyCompleteSyncOpsCallBack(IMG_PVOID		pvParam,
 
 OpFlushedComplete:
 		DoModifyCompleteSyncOps(psModSyncOpInfo);
-		PVRSRVKernelSyncInfoDecRef(psModSyncOpInfo->psKernelSyncInfo, IMG_NULL);
 	}
 
 	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 	sizeof(MODIFY_SYNC_OP_INFO), (IMG_VOID *)psModSyncOpInfo, 0);
@@ -4113,8 +4157,6 @@ PVRSRVDestroySyncInfoModObjBW(IMG_UINT32                                        
 		return 0;
 	}
 
-	PVRSRVKernelSyncInfoDecRef(psModSyncOpInfo->psKernelSyncInfo, IMG_NULL);
-
 	psDestroySyncInfoModObjOUT->eError = PVRSRVReleaseHandle(psPerProc->psHandleBase,
 																	 psDestroySyncInfoModObjIN->hKernelSyncInfoModObj,
 																	 PVRSRV_HANDLE_TYPE_SYNC_INFO_MOD_OBJ);
@@ -4175,15 +4217,6 @@ PVRSRVModifyPendingSyncOpsBW(IMG_UINT32									ui32BridgeID,
 		return 0;
 	}
 
-	
-	if (psKernelSyncInfo == IMG_NULL)
-	{
-		psModifySyncOpsOUT->eError = PVRSRV_ERROR_INVALID_PARAMS;
-		PVR_DPF((PVR_DBG_VERBOSE, "PVRSRVModifyPendingSyncOpsBW: SyncInfo bad handle"));
-		return 0;
-	}
-
-	PVRSRVKernelSyncInfoIncRef(psKernelSyncInfo, IMG_NULL);
 	
 	psModSyncOpInfo->psKernelSyncInfo = psKernelSyncInfo;
 	psModSyncOpInfo->ui32ModifyFlags = psModifySyncOpsIN->ui32ModifyFlags;
@@ -4256,7 +4289,6 @@ PVRSRVModifyCompleteSyncOpsBW(IMG_UINT32							ui32BridgeID,
 		return 0;
 	}
 
-	PVRSRVKernelSyncInfoDecRef(psModSyncOpInfo->psKernelSyncInfo, IMG_NULL);
 	psModSyncOpInfo->psKernelSyncInfo = IMG_NULL;
 
 	
@@ -4451,13 +4483,18 @@ FreeSyncInfoCallback(IMG_PVOID	pvParam,
                      IMG_BOOL	bDummy)
 {
 	PVRSRV_KERNEL_SYNC_INFO *psSyncInfo;
+	PVRSRV_ERROR eError;
 
 	PVR_UNREFERENCED_PARAMETER(ui32Param);
     PVR_UNREFERENCED_PARAMETER(bDummy);
 
 	psSyncInfo = (PVRSRV_KERNEL_SYNC_INFO *)pvParam;
 
-	PVRSRVKernelSyncInfoDecRef(psSyncInfo, IMG_NULL);
+	eError = PVRSRVFreeSyncInfoKM(psSyncInfo);
+	if (eError != PVRSRV_OK)
+	{
+		return eError;
+	}
 
 	return PVRSRV_OK;
 }
@@ -4520,7 +4557,7 @@ PVRSRVAllocSyncInfoBW(IMG_UINT32                                         ui32Bri
 
 	
  allocsyncinfo_errorexit_freesyncinfo:
-	PVRSRVKernelSyncInfoDecRef(psSyncInfo, IMG_NULL);
+	PVRSRVFreeSyncInfoKM(psSyncInfo);
 
  allocsyncinfo_errorexit:
 
@@ -4702,6 +4739,9 @@ CommonBridgeInit(IMG_VOID)
 	SetDispatchTableEntry(PVRSRV_BRIDGE_ALLOC_SHARED_SYS_MEM, PVRSRVAllocSharedSysMemoryBW);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_FREE_SHARED_SYS_MEM, PVRSRVFreeSharedSysMemoryBW);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_MAP_MEMINFO_MEM, PVRSRVMapMemInfoMemBW);
+
+    
+	SetDispatchTableEntry(PVRSRV_BRIDGE_GETMMU_PD_DEVPADDR, MMU_GetPDDevPAddrBW);
 
 	
 	SetDispatchTableEntry(PVRSRV_BRIDGE_INITSRV_CONNECT,	&PVRSRVInitSrvConnectBW);

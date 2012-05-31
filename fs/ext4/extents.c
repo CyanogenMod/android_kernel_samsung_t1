@@ -341,8 +341,6 @@ static int ext4_valid_extent(struct inode *inode, struct ext4_extent *ext)
 	ext4_fsblk_t block = ext4_ext_pblock(ext);
 	int len = ext4_ext_get_actual_len(ext);
 
-	if (len == 0)
-		return 0;
 	return ext4_data_block_valid(EXT4_SB(inode->i_sb), block, len);
 }
 
@@ -2471,10 +2469,6 @@ ext4_ext_rm_leaf(handle_t *handle, struct inode *inode,
 		if (uninitialized && num)
 			ext4_ext_mark_uninitialized(ex);
 
-		err = ext4_ext_dirty(handle, inode, path + depth);
-		if (err)
-			goto out;
-
 		/*
 		 * If the extent was completely released,
 		 * we need to remove it from the leaf
@@ -2495,6 +2489,10 @@ ext4_ext_rm_leaf(handle_t *handle, struct inode *inode,
 			}
 			le16_add_cpu(&eh->eh_entries, -1);
 		}
+
+		err = ext4_ext_dirty(handle, inode, path + depth);
+		if (err)
+			goto out;
 
 		ext_debug("new extent: %u:%u:%llu\n", block, num,
 				ext4_ext_pblock(ex));
@@ -2846,7 +2844,7 @@ static int ext4_split_extent_at(handle_t *handle,
 		if (err)
 			goto fix_extent_len;
 		/* update the extent length and mark as initialized */
-		ex->ee_len = cpu_to_le16(ee_len);
+		ex->ee_len = cpu_to_le32(ee_len);
 		ext4_ext_try_to_merge(inode, path, ex);
 		err = ext4_ext_dirty(handle, inode, path + depth);
 		goto out;

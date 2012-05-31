@@ -96,7 +96,6 @@ retry:
 
 		/* Try Error Recovery: for failing usbdpll locking */
 		if (!strcmp(clk->name, "dpll_usb_ck")) {
-
 			reg = __raw_readl(dd->mult_div1_reg);
 
 			/* Put in MN bypass */
@@ -132,6 +131,17 @@ retry:
 				first_time = false;
 				goto retry;
 			}
+
+			pr_info("\n========== USB DPLL DUMP ===========\n");
+			pr_info("CM_CLKMODE_DPLL_USB         :%08x\n", omap_readl(0x4A008180));
+			pr_info("CM_IDLEST_DPLL_USB          :%08x\n", omap_readl(0x4A008184));
+			pr_info("CM_AUTOIDLE_DPLL_USB        :%08x\n", omap_readl(0x4A008188));
+			pr_info("CM_CLKSEL_DPLL_USB          :%08x\n", omap_readl(0x4A00818C));
+			pr_info("CM_DIV_M2_DPLL_USB          :%08x\n", omap_readl(0x4A008190));
+			pr_info("CM_SSC_DELTAMSTEP_DPLL_USB  :%08x\n", omap_readl(0x4A0081A8));
+			pr_info("CM_SSC_MODFREQDIV_DPLL_USB  :%08x\n", omap_readl(0x4A0081AC));
+			pr_info("CM_CLKDCOLDO_DPLL_USB       :%08x\n", omap_readl(0x4A0081B4));
+			pr_info("========== USB DPLL DUMP: End ===========\n");
 		}
 	} else {
 		pr_debug("clock: %s transition to '%s' in %d loops\n",
@@ -676,5 +686,46 @@ unsigned long omap3_clkoutx2_recalc(struct clk *clk)
 		rate = clk->parent->rate;
 	else
 		rate = clk->parent->rate * 2;
+	return rate;
+}
+
+/**
+ * omap3_clkoutx2_mn_recalc - recalculate rate for DPLL clock outputs
+ * @clk: DPLL clock output
+ *
+ * Look up parent DPLL and if it is locked then recalculate rate via the usual
+ * clksel method; if it is bypassed then take the bypass clock rate.
+ */
+unsigned long omap3_clkout_mn_recalc(struct clk *clk)
+{
+	const struct dpll_data *dd;
+	unsigned long rate;
+	u32 v;
+	struct clk *pclk;
+
+	/* Walk up the parents of clk, looking for a DPLL */
+	pclk = clk->parent;
+	while (pclk && !pclk->dpll_data)
+		pclk = pclk->parent;
+
+	/* clk does not have a DPLL as a parent? */
+	WARN_ON(!pclk);
+
+	if (pclk)
+		dd = pclk->dpll_data;
+	else {
+		pr_err("%s: pclk is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	WARN_ON(!dd->enable_mask);
+
+	v = __raw_readl(dd->control_reg) & dd->enable_mask;
+	v >>= __ffs(dd->enable_mask);
+	if (v == OMAP3XXX_EN_DPLL_LOCKED)
+		rate = omap2_clksel_recalc(clk);
+	else
+		rate = dd->clk_bypass->rate;
+
 	return rate;
 }

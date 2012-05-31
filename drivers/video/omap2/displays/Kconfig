@@ -30,6 +30,13 @@ config PANEL_NEC_NL8048HL11_01B
 		This NEC NL8048HL11-01B panel is TFT LCD
 		used in the Zoom2/3/3630 sdp boards.
 
+config PANEL_S6E8AA0
+        tristate "S6E8AA0 DSI Panel"
+        depends on OMAP2_DSS_DSI
+        select BACKLIGHT_CLASS_DEVICE
+        help
+          S6E8AA0 video mode panel.
+
 config PANEL_TAAL
         tristate "Taal DSI Panel"
         depends on OMAP2_DSS_DSI
@@ -48,4 +55,26 @@ config PANEL_ACX565AKM
 	select BACKLIGHT_CLASS_DEVICE
 	help
 	  This is the LCD panel used on Nokia N900
+
+config PANEL_LD9040
+	tristate "LD9040 Panel"
+	depends on OMAP2_DSS_DPI
+	select SPI
+	help
+		This enables support for Samsung LD9040 LCD panel
+
+config PANEL_LTN070NL01
+	tristate "LTN070NL01 Panel"
+	depends on OMAP2_DSS_DPI
+	default n
+	help
+		This enables support for Samsung LTN070NL01 LCD panel
+
+config PANEL_LTN101AL03
+	tristate "LTN101AL03 Panel"
+	depends on OMAP2_DSS_DPI
+	default n
+	help
+		This enables support for Samsung LTN101AL03 LCD panel
+
 endmenu

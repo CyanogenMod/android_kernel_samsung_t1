@@ -705,26 +705,10 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 	if (type == HUB_INIT3)
 		goto init3;
 
-	/* The superspeed hub except for root hub has to use Hub Depth
-	 * value as an offset into the route string to locate the bits
-	 * it uses to determine the downstream port number. So hub driver
-	 * should send a set hub depth request to superspeed hub after
-	 * the superspeed hub is set configuration in initialization or
-	 * reset procedure.
-	 *
-	 * After a resume, port power should still be on.
+	/* After a resume, port power should still be on.
 	 * For any other type of activation, turn it on.
 	 */
 	if (type != HUB_RESUME) {
-		if (hdev->parent && hub_is_superspeed(hdev)) {
-			ret = usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-					HUB_SET_DEPTH, USB_RT_HUB,
-					hdev->level - 1, 0, NULL, 0,
-					USB_CTRL_SET_TIMEOUT);
-			if (ret < 0)
-				dev_err(hub->intfdev,
-						"set hub depth failed\n");
-		}
 
 		/* Speed up system boot by using a delayed_work for the
 		 * hub's initial power-up delays.  This is pretty awkward
@@ -829,12 +813,6 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 					USB_PORT_FEAT_C_PORT_LINK_STATE);
 		}
 
-		if ((portchange & USB_PORT_STAT_C_BH_RESET) &&
-				hub_is_superspeed(hub->hdev)) {
-			need_debounce_delay = true;
-			clear_port_feature(hub->hdev, port1,
-					USB_PORT_FEAT_C_BH_PORT_RESET);
-		}
 		/* We can forget about a "removed" device when there's a
 		 * physical disconnect or the connect status changes.
 		 */
@@ -1001,6 +979,18 @@ static int hub_configure(struct usb_hub *hub,
 	if (!hub->descriptor) {
 		ret = -ENOMEM;
 		goto fail;
+	}
+
+	if (hub_is_superspeed(hdev) && (hdev->parent != NULL)) {
+		ret = usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
+				HUB_SET_DEPTH, USB_RT_HUB,
+				hdev->level - 1, 0, NULL, 0,
+				USB_CTRL_SET_TIMEOUT);
+
+		if (ret < 0) {
+			message = "can't set hub depth";
+			goto fail;
+		}
 	}
 
 	/* Request the entire hub descriptor.
@@ -1644,11 +1634,13 @@ void usb_disconnect(struct usb_device **pdev)
 {
 	struct usb_device	*udev = *pdev;
 	int			i;
+	struct usb_hcd		*hcd;
 
 	if (!udev) {
 		pr_debug ("%s nodev\n", __func__);
 		return;
 	}
+	hcd = bus_to_hcd(udev->bus);
 
 	/* mark the device as inactive, so any further urb submissions for
 	 * this device (and any of its children) will fail immediately.
@@ -1671,7 +1663,9 @@ void usb_disconnect(struct usb_device **pdev)
 	 * so that the hardware is now fully quiesced.
 	 */
 	dev_dbg (&udev->dev, "unregistering device\n");
+	mutex_lock(hcd->bandwidth_mutex);
 	usb_disable_device(udev, 0);
+	mutex_unlock(hcd->bandwidth_mutex);
 	usb_hcd_synchronize_unlinks(udev);
 
 	usb_remove_ep_devs(&udev->ep0);
@@ -2253,7 +2247,7 @@ static int check_port_resume_type(struct usb_device *udev,
 	 * so try a reset-resume instead.
 	 */
 	else if (!(portstatus & USB_PORT_STAT_ENABLE) && !udev->reset_resume) {
-		if (udev->persist_enabled)
+		if (udev->persist_enabled && !(udev->quirks & USB_QUIRK_NO_RESET_RESUME))
 			udev->reset_resume = 1;
 		else
 			status = -ENODEV;
@@ -2425,6 +2419,9 @@ static int finish_port_resume(struct usb_device *udev)
  retry_reset_resume:
 		status = usb_reset_and_verify_device(udev);
 
+	if (udev->quirks & USB_QUIRK_NO_GET_STATUS)
+		goto done;
+
  	/* 10.5.4.5 says be sure devices in the tree are still there.
  	 * For now let's assume the device didn't go crazy on resume,
 	 * and device drivers will know about any resume quirks.
@@ -2436,7 +2433,8 @@ static int finish_port_resume(struct usb_device *udev)
 			status = (status > 0 ? 0 : -ENODEV);
 
 		/* If a normal resume failed, try doing a reset-resume */
-		if (status && !udev->reset_resume && udev->persist_enabled) {
+		if (status && !udev->reset_resume && udev->persist_enabled &&
+				!(udev->quirks & USB_QUIRK_NO_RESET_RESUME)) {
 			dev_dbg(&udev->dev, "retry with reset-resume\n");
 			udev->reset_resume = 1;
 			goto retry_reset_resume;
@@ -2463,6 +2461,7 @@ static int finish_port_resume(struct usb_device *udev)
 		}
 		status = 0;
 	}
+done:
 	return status;
 }
 
@@ -4050,3 +4049,18 @@ void usb_queue_reset_device(struct usb_interface *iface)
 	schedule_work(&iface->reset_ws);
 }
 EXPORT_SYMBOL_GPL(usb_queue_reset_device);
+
+void usb_force_disconnect(struct usb_device *udev)
+{
+       struct usb_hub                  *parent_hub;
+       int                             port1 = udev->portnum;
+
+       if (!udev->parent)
+               return;
+
+       parent_hub = hdev_to_hub(udev->parent);
+       if (!parent_hub)
+               return;
+
+       hub_port_logical_disconnect(parent_hub, port1);
+}

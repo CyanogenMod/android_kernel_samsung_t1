@@ -22,6 +22,7 @@
 #include <linux/clk.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
+#include <linux/regulator/consumer.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -35,6 +36,7 @@
 #include <plat/mux.h>
 #include <plat/mcbsp.h>
 
+#include <linux/gpio.h>
 #include "omap-mcpdm.h"
 #include "omap-abe.h"
 #include "omap-abe-dsp.h"
@@ -42,10 +44,85 @@
 #include "omap-mcbsp.h"
 #include "../codecs/twl6040.h"
 
+#ifdef CONFIG_MACH_TUNA
+#include "../../../arch/arm/mach-omap2/board-tuna.h"
+
+#define TUNA_MAIN_MIC_GPIO  48
+#define TUNA_SUB_MIC_GPIO   171
+#endif
+#ifdef CONFIG_MACH_OMAP4_SAMSUNG
+#undef TI_HS_JACK
+#include "../../../arch/arm/mach-omap2/mux.h"
+#include "../../../arch/arm/mach-omap2/omap_muxtbl.h"
+#endif
+
 static int twl6040_power_mode;
 static int mcbsp_cfg;
+#ifdef CONFIG_CONFIG_SND_OMAP_SOC_PDM_GAIN_COMPENSATION
 static struct snd_soc_codec *twl6040_codec;
+#endif
+struct regulator *twl6040_clk32kreg;
 
+
+#ifdef CONFIG_MACH_TUNA
+
+static int main_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	gpio_set_value(TUNA_MAIN_MIC_GPIO, SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+
+static int sub_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	gpio_set_value(TUNA_SUB_MIC_GPIO, SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_MACH_OMAP4_SAMSUNG
+enum {
+	GPIO_MICBIAS_EN = 0,
+	GPIO_SUB_MICBIAS_EN
+};
+
+static struct gpio micbias_gpios[] = {
+	[GPIO_MICBIAS_EN] = {
+		.flags  = GPIOF_OUT_INIT_LOW,
+		.label  = "MICBIAS_EN",
+	},
+	[GPIO_SUB_MICBIAS_EN] = {
+		.flags  = GPIOF_OUT_INIT_LOW,
+		.label  = "SUB_MICBIAS_EN",
+	}
+};
+
+static void sec_omap4_micbias_gpio_init(void)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(micbias_gpios); i++)
+		micbias_gpios[i].gpio =
+			omap_muxtbl_get_gpio_by_name(micbias_gpios[i].label);
+	gpio_request_array(micbias_gpios, ARRAY_SIZE(micbias_gpios));
+}
+
+static int main_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	gpio_set_value(micbias_gpios[GPIO_MICBIAS_EN].gpio,
+			SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+
+static int sub_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	gpio_set_value(micbias_gpios[GPIO_SUB_MICBIAS_EN].gpio,
+			SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+#endif
 static int sdp4430_modem_mcbsp_configure(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params, int flag)
 {
@@ -67,18 +144,49 @@ static int sdp4430_modem_mcbsp_configure(struct snd_pcm_substream *substream,
 			modem_substream[substream->stream]->private_data;
 
 		if (!mcbsp_cfg) {
-			/* Set cpu DAI configuration */
-			ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
-					  SND_SOC_DAIFMT_I2S |
-					  SND_SOC_DAIFMT_NB_NF |
-					  SND_SOC_DAIFMT_CBM_CFM);
+#ifdef CONFIG_MACH_TUNA
+			if (omap4_tuna_get_type() == TUNA_TYPE_TORO) {
+				/* Set cpu DAI configuration */
+				ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
+						SND_SOC_DAIFMT_I2S |
+						SND_SOC_DAIFMT_NB_NF |
+						SND_SOC_DAIFMT_CBS_CFS);
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI format\n");
+					goto exit;
+				}
 
-			if (unlikely(ret < 0)) {
-				printk(KERN_ERR "can't set Modem cpu DAI configuration\n");
-				goto exit;
-			} else {
-				mcbsp_cfg = 1;
+				/* McBSP2 fclk reparented to ABE_24M_FCLK */
+				ret = snd_soc_dai_set_sysclk(modem_rtd->cpu_dai,
+						OMAP_MCBSP_SYSCLK_CLKS_FCLK,
+						32 * 96 * params_rate(params),
+						SND_SOC_CLOCK_IN);
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI sysclk\n");
+					goto exit;
+				}
+
+				/* assuming McBSP2 is S16_LE stereo */
+				ret = snd_soc_dai_set_clkdiv(modem_rtd->cpu_dai, 0, 96);
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI clkdiv\n");
+					goto exit;
+				}
+			} else
+#endif
+			{
+				/* Set cpu DAI configuration */
+				ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
+						SND_SOC_DAIFMT_I2S |
+						SND_SOC_DAIFMT_NB_NF |
+						SND_SOC_DAIFMT_CBM_CFM);
+
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI configuration\n");
+					goto exit;
+				}
 			}
+			mcbsp_cfg = 1;
 		}
 
 		if (params != NULL) {
@@ -128,57 +236,32 @@ static struct snd_soc_ops sdp4430_modem_ops = {
 	.hw_free = sdp4430_modem_hw_free,
 };
 
-static int sdp4430_mcpdm_startup(struct snd_pcm_substream *substream)
+static int sdp4430_mcpdm_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_codec *codec = rtd->codec;
 	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct twl6040 *twl6040 = codec->control_data;
 	int clk_id, freq, ret;
 
-	/* TWL6040 supplies McPDM PAD_CLKS */
-	ret = twl6040_enable(twl6040);
-	if (ret) {
-		printk(KERN_ERR "failed to enable TWL6040\n");
-		return ret;
-	}
-
 	if (twl6040_power_mode) {
-		clk_id = TWL6040_HPPLL_ID;
+		clk_id = TWL6040_SYSCLK_SEL_HPPLL;
 		freq = 38400000;
 	} else {
-		clk_id = TWL6040_LPPLL_ID;
+		clk_id = TWL6040_SYSCLK_SEL_LPPLL;
 		freq = 32768;
 	}
 
 	/* set the codec mclk */
 	ret = snd_soc_dai_set_sysclk(codec_dai, clk_id, freq,
 				SND_SOC_CLOCK_IN);
-	if (ret) {
+	if (ret)
 		printk(KERN_ERR "can't set codec system clock\n");
-		goto err;
-	}
 
-	return 0;
-
-err:
-	twl6040_disable(twl6040);
 	return ret;
 }
 
-static void sdp4430_mcpdm_shutdown(struct snd_pcm_substream *substream)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_codec *codec = rtd->codec;
-	struct twl6040 *twl6040 = codec->control_data;
-
-	/* TWL6040 supplies McPDM PAD_CLKS */
-	twl6040_disable(twl6040);
-}
-
 static struct snd_soc_ops sdp4430_mcpdm_ops = {
-	.startup = sdp4430_mcpdm_startup,
-	.shutdown = sdp4430_mcpdm_shutdown,
+	.hw_params = sdp4430_mcpdm_hw_params,
 };
 
 static int sdp4430_mcbsp_hw_params(struct snd_pcm_substream *substream,
@@ -187,27 +270,42 @@ static int sdp4430_mcbsp_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret = 0;
-	unsigned int be_id;
+	unsigned int be_id, fmt, channels;
 
 
         be_id = rtd->dai_link->be_id;
 
-	if (be_id == OMAP_ABE_DAI_MM_FM) {
-		/* Set cpu DAI configuration */
-		ret = snd_soc_dai_set_fmt(cpu_dai,
-				  SND_SOC_DAIFMT_I2S |
-				  SND_SOC_DAIFMT_NB_NF |
-				  SND_SOC_DAIFMT_CBM_CFM);
-	} else if (be_id == OMAP_ABE_DAI_BT_VX) {
-	        ret = snd_soc_dai_set_fmt(cpu_dai,
-                                  SND_SOC_DAIFMT_DSP_B |
-                                  SND_SOC_DAIFMT_NB_IF |
-                                  SND_SOC_DAIFMT_CBM_CFM);
+	if (be_id == OMAP_ABE_DAI_BT_VX) {
+		if (machine_is_tuna() || machine_is_omap4_samsung())
+			fmt = SND_SOC_DAIFMT_I2S |
+				SND_SOC_DAIFMT_NB_NF |
+				SND_SOC_DAIFMT_CBM_CFM;
+		else
+			fmt = SND_SOC_DAIFMT_DSP_B |
+				SND_SOC_DAIFMT_NB_IF |
+				SND_SOC_DAIFMT_CBM_CFM;
+	} else {
+		fmt = SND_SOC_DAIFMT_I2S |
+			SND_SOC_DAIFMT_NB_NF |
+			SND_SOC_DAIFMT_CBM_CFM;
 	}
 
+	ret = snd_soc_dai_set_fmt(cpu_dai, fmt);
 	if (ret < 0) {
 		printk(KERN_ERR "can't set cpu DAI configuration\n");
 		return ret;
+	}
+
+	if (params != NULL) {
+		/* Configure McBSP internal buffer usage */
+		/* this need to be done for playback and/or record */
+		channels = params_channels(params);
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			omap_mcbsp_set_tx_threshold(
+				cpu_dai->id, channels);
+		else
+			omap_mcbsp_set_rx_threshold(
+				cpu_dai->id, channels);
 	}
 
 	/*
@@ -216,10 +314,24 @@ static int sdp4430_mcbsp_hw_params(struct snd_pcm_substream *substream,
 	 */
 	/* Set McBSP clock to external */
 	ret = snd_soc_dai_set_sysclk(cpu_dai, OMAP_MCBSP_SYSCLK_CLKS_FCLK,
-				     64 * params_rate(params),
+				     32 * 96 * params_rate(params),
 				     SND_SOC_CLOCK_IN);
 	if (ret < 0)
 		printk(KERN_ERR "can't set cpu system clock\n");
+
+	ret = snd_soc_dai_set_clkdiv(cpu_dai, 0, 96);
+	if (ret < 0)
+		printk(KERN_ERR "can't set McBSP cpu DAI clkdiv\n");
+
+	/*
+	 * Configure McBSP internal buffer threshold
+	 * for playback/record
+	 */
+	channels = params_channels(params);
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		omap_mcbsp_set_tx_threshold(cpu_dai->id, channels);
+	else
+		omap_mcbsp_set_rx_threshold(cpu_dai->id, channels);
 
 	return ret;
 }
@@ -238,13 +350,14 @@ static int mcbsp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	if (be_id == OMAP_ABE_DAI_MM_FM)
 		channels->min = 2;
 	else if (be_id == OMAP_ABE_DAI_BT_VX)
-		channels->min = 1;
+		channels->min = 2;
 	snd_mask_set(&params->masks[SNDRV_PCM_HW_PARAM_FORMAT -
 	                            SNDRV_PCM_HW_PARAM_FIRST_MASK],
 	                            SNDRV_PCM_FORMAT_S16_LE);
 	return 0;
 }
 
+#ifdef TI_HS_JACK
 /* Headset jack */
 static struct snd_soc_jack hs_jack;
 
@@ -259,6 +372,7 @@ static struct snd_soc_jack_pin hs_jack_pins[] = {
 		.mask = SND_JACK_HEADPHONE,
 	},
 };
+#endif
 
 static int sdp4430_get_power_mode(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -292,23 +406,37 @@ static const struct snd_kcontrol_new sdp4430_controls[] = {
 
 /* SDP4430 machine DAPM */
 static const struct snd_soc_dapm_widget sdp4430_twl6040_dapm_widgets[] = {
-	SND_SOC_DAPM_MIC("Ext Mic", NULL),
+
+	SND_SOC_DAPM_MIC("Ext Main Mic", NULL),
+	SND_SOC_DAPM_MIC("Ext Sub Mic", NULL),
+	SND_SOC_DAPM_MICBIAS_E("Ext Main Mic Bias", SND_SOC_NOPM, 0, 0,
+				main_mic_bias_event,
+				SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+	SND_SOC_DAPM_MICBIAS_E("Ext Sub Mic Bias", SND_SOC_NOPM, 0, 0,
+				sub_mic_bias_event,
+				SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 	SND_SOC_DAPM_SPK("Ext Spk", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_HP("Headset Stereophone", NULL),
 	SND_SOC_DAPM_SPK("Earphone Spk", NULL),
-	SND_SOC_DAPM_INPUT("Aux/FM Stereo In"),
+	SND_SOC_DAPM_INPUT("FM Stereo In"),
+	SND_SOC_DAPM_LINE("Aux Stereo Out", NULL),
 };
 
 static const struct snd_soc_dapm_route audio_map[] = {
 	/* External Mics: MAINMIC, SUBMIC with bias*/
-	{"MAINMIC", NULL, "Main Mic Bias"},
-	{"SUBMIC", NULL, "Main Mic Bias"},
-	{"Main Mic Bias", NULL, "Ext Mic"},
+	{"MAINMIC", NULL, "Ext Main Mic Bias"},
+	{"SUBMIC", NULL, "Ext Sub Mic Bias"},
+	{"Ext Main Mic Bias" , NULL, "Ext Main Mic"},
+	{"Ext Sub Mic Bias" , NULL, "Ext Sub Mic"},
 
 	/* External Speakers: HFL, HFR */
 	{"Ext Spk", NULL, "HFL"},
 	{"Ext Spk", NULL, "HFR"},
+
+	/* Aux/FM Stereo OutL AUXL, AUXR */
+	{"Aux Stereo Out", NULL, "AUXL"},
+	{"Aux Stereo Out", NULL, "AUXR"},
 
 	/* Headset Mic: HSMIC with bias */
 	{"HSMIC", NULL, "Headset Mic Bias"},
@@ -322,10 +450,11 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"Earphone Spk", NULL, "EP"},
 
 	/* Aux/FM Stereo In: AFML, AFMR */
-	{"AFML", NULL, "Aux/FM Stereo In"},
-	{"AFMR", NULL, "Aux/FM Stereo In"},
+	{"AFML", NULL, "FM Stereo In"},
+	{"AFMR", NULL, "FM Stereo In"},
 };
 
+#ifdef CONFIG_SND_OMAP_SOC_PDM_GAIN_COMPENSATION
 static int sdp4430_set_pdm_dl1_gains(struct snd_soc_dapm_context *dapm)
 {
 	int output, val;
@@ -345,6 +474,47 @@ static int sdp4430_set_pdm_dl1_gains(struct snd_soc_dapm_context *dapm)
 	}
 
 	return omap_abe_set_dl1_output(output);
+}
+#endif
+
+static int sdp4430_mcpdm_twl6040_pre(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
+	struct twl6040 *twl6040 = codec->control_data;
+	int ret;
+
+	/* enable external 32kHz clock */
+	ret = regulator_enable(twl6040_clk32kreg);
+	if (ret) {
+		printk(KERN_ERR "failed to enable TWL6040 CLK32K\n");
+		return ret;
+	}
+
+	/* disable internal 32kHz oscillator */
+	twl6040_clear_bits(twl6040, TWL6040_REG_ACCCTL, TWL6040_CLK32KSEL);
+
+	/* TWL6040 supplies McPDM PAD_CLKS */
+	return twl6040_enable(twl6040);
+}
+
+static void sdp4430_mcpdm_twl6040_post(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
+	struct twl6040 *twl6040 = codec->control_data;
+	int ret;
+
+	/* TWL6040 supplies McPDM PAD_CLKS */
+	twl6040_disable(twl6040);
+
+	/* enable internal 32kHz oscillator */
+	twl6040_set_bits(twl6040, TWL6040_REG_ACCCTL, TWL6040_CLK32KSEL);
+
+	/* disable external 32kHz clock */
+	ret = regulator_disable(twl6040_clk32kreg);
+	if (ret)
+		printk(KERN_ERR "failed to disable TWL6040 CLK32K\n");
 }
 
 static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
@@ -371,15 +541,22 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
 
 	/* SDP4430 connected pins */
-	snd_soc_dapm_enable_pin(dapm, "Ext Mic");
+	if (machine_is_tuna() || machine_is_omap4_samsung()) {
+		snd_soc_dapm_enable_pin(dapm, "Ext Main Mic");
+		snd_soc_dapm_enable_pin(dapm, "Ext Sub Mic");
+	}
 	snd_soc_dapm_enable_pin(dapm, "Ext Spk");
 	snd_soc_dapm_enable_pin(dapm, "AFML");
 	snd_soc_dapm_enable_pin(dapm, "AFMR");
+	snd_soc_dapm_enable_pin(dapm, "Aux Stereo Out");
 	snd_soc_dapm_enable_pin(dapm, "Headset Mic");
 	snd_soc_dapm_enable_pin(dapm, "Headset Stereophone");
 
 	/* allow audio paths from the audio modem to run during suspend */
-	snd_soc_dapm_ignore_suspend(dapm, "Ext Mic");
+	if (machine_is_tuna() || machine_is_omap4_samsung()) {
+		snd_soc_dapm_ignore_suspend(dapm, "Ext Main Mic");
+		snd_soc_dapm_ignore_suspend(dapm, "Ext Sub Mic");
+	}
 	snd_soc_dapm_ignore_suspend(dapm, "Ext Spk");
 	snd_soc_dapm_ignore_suspend(dapm, "AFML");
 	snd_soc_dapm_ignore_suspend(dapm, "AFMR");
@@ -390,6 +567,7 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret)
 		return ret;
 
+#ifdef TI_HS_JACK
 	/* Headset jack detection */
 	ret = snd_soc_jack_new(codec, "Headset Jack",
 				SND_JACK_HEADSET, &hs_jack);
@@ -403,6 +581,7 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 		twl6040_hs_jack_detect(codec, &hs_jack, SND_JACK_HEADSET);
 	else
 		snd_soc_jack_report(&hs_jack, SND_JACK_HEADSET, SND_JACK_HEADSET);
+#endif
 
 	/* DC offset cancellation computation */
 	hsotrim = snd_soc_read(codec, TWL6040_REG_HSOTRIM);
@@ -460,6 +639,7 @@ static int sdp4430_bt_init(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
+#ifdef CONFIG_SND_OMAP_SOC_PDM_GAIN_COMPENSATION
 static int sdp4430_stream_event(struct snd_soc_dapm_context *dapm)
 {
 	/*
@@ -468,6 +648,7 @@ static int sdp4430_stream_event(struct snd_soc_dapm_context *dapm)
 	 */
 	return sdp4430_set_pdm_dl1_gains(dapm);
 }
+#endif
 
 /* TODO: make this a separate BT CODEC driver or DUMMY */
 static struct snd_soc_dai_driver dai[] = {
@@ -675,9 +856,23 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.codec_dai_name =  "twl6040-dl1",
 		.codec_name = "twl6040-codec",
 
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.ignore_suspend = 1,
 	},
+#ifdef CONFIG_MACH_TUNA
+	{
+		.name = "SPDIF",
+		.stream_name = "SPDIF",
+		.cpu_dai_name = "omap-mcasp-dai",
+		.codec_dai_name = "dit-hifi",	/* dummy s/pdif transciever
+						 * driver */
+		.platform_name = "omap-pcm-audio",
+		.ignore_suspend = 1,
+		.no_codec = 1,
+	},
+#endif
 
 /*
  * Backend DAIs - i.e. dynamically matched interfaces, invisible to userspace.
@@ -698,6 +893,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
 		.init = sdp4430_twl6040_init,
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_DL1,
 		.ignore_suspend = 1,
@@ -716,6 +913,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
 		.ops = &sdp4430_mcpdm_ops,
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.be_id = OMAP_ABE_DAI_PDM_UL,
 		.ignore_suspend = 1,
 	},
@@ -733,6 +932,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
 		.init = sdp4430_twl6040_dl2_init,
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_DL2,
 		.ignore_suspend = 1,
@@ -750,6 +951,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.codec_name = "twl6040-codec",
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_VIB,
 	},
@@ -792,7 +995,7 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 	},
 	{
 		.name = OMAP_ABE_BE_MM_EXT0,
-		.stream_name = "FM",
+		.stream_name = "FM Playback",
 
 		/* ABE components - MCBSP2 - MM-EXT */
 		.cpu_dai_name = "omap-mcbsp-dai.1",
@@ -833,7 +1036,9 @@ static struct snd_soc_card snd_soc_sdp4430 = {
 	.long_name = "TI OMAP4 Board",
 	.dai_link = sdp4430_dai,
 	.num_links = ARRAY_SIZE(sdp4430_dai),
+#ifdef CONFIG_SND_OMAP_SOC_PDM_GAIN_COMPENSATION
 	.stream_event = sdp4430_stream_event,
+#endif
 };
 
 static struct platform_device *sdp4430_snd_device;
@@ -843,20 +1048,60 @@ static int __init sdp4430_soc_init(void)
 {
 	int ret;
 
-	if (!machine_is_omap_4430sdp() && !machine_is_omap4_panda()) {
-		pr_debug("Not SDP4430 or PandaBoard!\n");
+	if (!machine_is_omap_4430sdp() && !machine_is_omap4_panda() &&
+			!machine_is_tuna() && !machine_is_omap4_samsung()) {
+		pr_debug("Not SDP4430, PandaBoard or Tuna!\n");
 		return -ENODEV;
 	}
 	printk(KERN_INFO "SDP4430 SoC init\n");
+
+#ifdef CONFIG_MACH_TUNA
+	if (machine_is_tuna()) {
+		ret = gpio_request(TUNA_MAIN_MIC_GPIO, "MAIN_MICBIAS_EN");
+		if (ret)
+			goto mainmic_gpio_err;
+
+		gpio_direction_output(TUNA_MAIN_MIC_GPIO, 0);
+
+		ret = gpio_request(TUNA_SUB_MIC_GPIO, "SUB_MICBIAS_EN");
+		if (ret)
+			goto submic_gpio_err;
+		gpio_direction_output(TUNA_SUB_MIC_GPIO, 0);
+	}
+#endif
+#ifdef CONFIG_MACH_OMAP4_SAMSUNG
+	if (machine_is_omap4_samsung())
+		sec_omap4_micbias_gpio_init();
+#endif
+
 	if (machine_is_omap_4430sdp())
 		snd_soc_sdp4430.name = "SDP4430";
 	else if (machine_is_omap4_panda())
 		snd_soc_sdp4430.name = "Panda";
+	else if (machine_is_tuna())
+		snd_soc_sdp4430.name = "Tuna";
+	else if (machine_is_omap4_samsung())
+		snd_soc_sdp4430.name = "SEC_OMAP4";
+
+	twl6040_clk32kreg = regulator_get(NULL, "twl6040_clk32k");
+	if (IS_ERR(twl6040_clk32kreg)) {
+		ret = PTR_ERR(twl6040_clk32kreg);
+		printk(KERN_ERR "failed to get CLK32K %d\n", ret);
+		goto clk32kreg_err;
+	}
+
+	/* enable external 32kHz clock during TWL6040/McPDM probe */
+	ret = regulator_enable(twl6040_clk32kreg);
+	if (ret) {
+		printk(KERN_ERR "failed to enable TWL6040 CLK32K\n");
+		goto clk32kreg_ena_err;
+	}
 
 	sdp4430_snd_device = platform_device_alloc("soc-audio", -1);
 	if (!sdp4430_snd_device) {
 		printk(KERN_ERR "Platform device allocation failed\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto device_err;
 	}
 
 	ret = snd_soc_register_dais(&sdp4430_snd_device->dev, dai, ARRAY_SIZE(dai));
@@ -868,20 +1113,60 @@ static int __init sdp4430_soc_init(void)
 	if (ret)
 		goto err;
 
+	regulator_disable(twl6040_clk32kreg);
+
+#ifdef CONFIG_SND_OMAP_SOC_PDM_GAIN_COMPENSATION
 	twl6040_codec = snd_soc_card_get_codec(&snd_soc_sdp4430,
 					"twl6040-codec");
-
+#endif
 	return 0;
 
 err:
 	printk(KERN_ERR "Unable to add platform device\n");
 	platform_device_put(sdp4430_snd_device);
+device_err:
+	regulator_disable(twl6040_clk32kreg);
+clk32kreg_ena_err:
+	regulator_put(twl6040_clk32kreg);
+
+#ifdef CONFIG_MACH_TUNA
+clk32kreg_err:
+	if (machine_is_tuna())
+		gpio_free(TUNA_SUB_MIC_GPIO);
+submic_gpio_err:
+	if (machine_is_tuna())
+		gpio_free(TUNA_MAIN_MIC_GPIO);
+#endif
+
+#ifdef CONFIG_MACH_OMAP4_SAMSUNG
+clk32kreg_err:
+	if (machine_is_omap4_samsung())
+		gpio_free(micbias_gpios[GPIO_SUB_MICBIAS_EN].gpio);
+submic_gpio_err:
+	if (machine_is_omap4_samsung())
+		gpio_free(micbias_gpios[GPIO_MICBIAS_EN].gpio);
+#endif
+mainmic_gpio_err:
 	return ret;
 }
 module_init(sdp4430_soc_init);
 
 static void __exit sdp4430_soc_exit(void)
 {
+#ifdef CONFIG_MACH_TUNA
+	if (machine_is_tuna()) {
+		gpio_free(TUNA_SUB_MIC_GPIO);
+		gpio_free(TUNA_MAIN_MIC_GPIO);
+	}
+#endif
+
+#ifdef CONFIG_MACH_OMAP4_SAMSUNG
+	if (machine_is_omap4_samsung()) {
+		gpio_free(micbias_gpios[GPIO_SUB_MICBIAS_EN].gpio);
+		gpio_free(micbias_gpios[GPIO_MICBIAS_EN].gpio);
+	}
+#endif
+	regulator_put(twl6040_clk32kreg);
 	platform_device_unregister(sdp4430_snd_device);
 }
 module_exit(sdp4430_soc_exit);

@@ -1269,4 +1269,4 @@ static int __init ds_init(void)
 	return vio_register_driver(&ds_driver);
 }
 
-fs_initcall(ds_init);
+subsys_initcall(ds_init);

@@ -1872,12 +1872,11 @@ static void iwl3945_bg_reg_txpower_periodic(struct work_struct *work)
 	struct iwl_priv *priv = container_of(work, struct iwl_priv,
 					     _3945.thermal_periodic.work);
 
-	mutex_lock(&priv->mutex);
-	if (test_bit(STATUS_EXIT_PENDING, &priv->status) || priv->txq == NULL)
-		goto out;
+	if (test_bit(STATUS_EXIT_PENDING, &priv->status))
+		return;
 
+	mutex_lock(&priv->mutex);
 	iwl3945_reg_txpower_periodic(priv);
-out:
 	mutex_unlock(&priv->mutex);
 }
 

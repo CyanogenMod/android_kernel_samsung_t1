@@ -183,11 +183,7 @@ char *pp_iface_stat(struct iface_stat *is)
 		res = kasprintf(GFP_ATOMIC, "iface_stat@%p{"
 				"list=list_head{...}, "
 				"ifname=%s, "
-				"total_dev={rx={bytes=%llu, "
-				"packets=%llu}, "
-				"tx={bytes=%llu, "
-				"packets=%llu}}, "
-				"total_skb={rx={bytes=%llu, "
+				"total={rx={bytes=%llu, "
 				"packets=%llu}, "
 				"tx={bytes=%llu, "
 				"packets=%llu}}, "
@@ -202,14 +198,10 @@ char *pp_iface_stat(struct iface_stat *is)
 				"tag_stat_tree=rb_root{...}}",
 				is,
 				is->ifname,
-				is->totals_via_dev[IFS_RX].bytes,
-				is->totals_via_dev[IFS_RX].packets,
-				is->totals_via_dev[IFS_TX].bytes,
-				is->totals_via_dev[IFS_TX].packets,
-				is->totals_via_skb[IFS_RX].bytes,
-				is->totals_via_skb[IFS_RX].packets,
-				is->totals_via_skb[IFS_TX].bytes,
-				is->totals_via_skb[IFS_TX].packets,
+				is->totals[IFS_RX].bytes,
+				is->totals[IFS_RX].packets,
+				is->totals[IFS_TX].bytes,
+				is->totals[IFS_TX].packets,
 				is->last_known_valid,
 				is->last_known[IFS_RX].bytes,
 				is->last_known[IFS_RX].packets,

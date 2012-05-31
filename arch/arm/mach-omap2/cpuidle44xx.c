@@ -112,16 +112,16 @@ static struct clockdomain *cpu1_cd;
 
 static struct cpuidle_params cpuidle_params_table[] = {
 	/* C1 - CPUx WFI + MPU ON  + CORE ON */
-	{.exit_latency = 2 + 2,	.target_residency = 5, .valid = 1},
+	{.exit_latency = 2 + 2,	.target_residency = 4, .valid = 1},
 	/* C2 - CPU0 INA + CPU1 INA + MPU INA  + CORE INA */
-	{.exit_latency = 1100, .target_residency = 1100, .valid = 1},
+	{.exit_latency = 300, .target_residency = 300, .valid = 1},
 	/* C3 - CPU0 OFF + CPU1 OFF + MPU CSWR + CORE CSWR */
-	{.exit_latency = 1200, .target_residency = 1200, .valid = 1},
+	{.exit_latency = 1000, .target_residency = 10000, .valid = 1},
 #ifdef CONFIG_OMAP_ALLOW_OSWR
 	/* C4 - CPU0 OFF + CPU1 OFF + MPU CSWR + CORE OSWR */
-	{.exit_latency = 1500, .target_residency = 1500, .valid = 1},
+	{.exit_latency = 1200, .target_residency = 35000, .valid = 1},
 #else
-	{.exit_latency = 1500, .target_residency = 1500, .valid = 0},
+	{.exit_latency = 1200, .target_residency = 35000, .valid = 0},
 #endif
 };
 
@@ -303,16 +303,6 @@ static void omap4_enter_idle_primary(struct omap4_processor_cx *cx)
 
 	cpu_pm_enter();
 
-	if (!keep_mpu_on) {
-		pwrdm_set_logic_retst(mpu_pd, cx->mpu_logic_state);
-		omap_set_pwrdm_state(mpu_pd, cx->mpu_state);
-	}
-
-	if (!keep_core_on) {
-		pwrdm_set_logic_retst(core_pd, cx->core_logic_state);
-		omap_set_pwrdm_state(core_pd, cx->core_state);
-	}
-
 	if (skip_off)
 		goto out;
 
@@ -327,9 +317,22 @@ static void omap4_enter_idle_primary(struct omap4_processor_cx *cx)
 	if (ret)
 		goto wake_cpu1;
 
+	if (!keep_mpu_on) {
+		pwrdm_set_logic_retst(mpu_pd, cx->mpu_logic_state);
+		omap_set_pwrdm_state(mpu_pd, cx->mpu_state);
+	}
+
+	if (!keep_core_on) {
+		pwrdm_set_logic_retst(core_pd, cx->core_logic_state);
+		omap_set_pwrdm_state(core_pd, cx->core_state);
+	}
+
 	pr_debug("%s: cpu0 down\n", __func__);
 
-	omap4_enter_sleep(0, PWRDM_POWER_OFF, false);
+	if (cx->type == OMAP4_STATE_C2)
+		omap4_enter_sleep(0, PWRDM_POWER_INACTIVE, false);
+	else
+		omap4_enter_sleep(0, PWRDM_POWER_OFF, false);
 
 	pr_debug("%s: cpu0 up\n", __func__);
 
@@ -664,7 +667,8 @@ void omap4_init_power_states(void)
 	omap4_power_states[OMAP4_STATE_C4].mpu_logic_state = PWRDM_POWER_RET;
 	omap4_power_states[OMAP4_STATE_C4].core_state = PWRDM_POWER_RET;
 	omap4_power_states[OMAP4_STATE_C4].core_logic_state = PWRDM_POWER_OFF;
-	omap4_power_states[OMAP4_STATE_C4].desc = "CPUs OFF, MPU CSWR + CORE OSWR";
+	omap4_power_states[OMAP4_STATE_C4].desc =
+		"CPUs OFF, MPU CSWR + CORE OSWR";
 
 }
 

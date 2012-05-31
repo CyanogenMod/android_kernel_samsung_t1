@@ -46,6 +46,7 @@
 #include <plat/omap_hwmod.h>
 #include <plat/usb.h>
 #include <plat/clock.h>
+#include <plat/omap-pm.h>
 
 /* EHCI Register Set */
 #define EHCI_INSNREG04					(0xA0)
@@ -71,6 +72,73 @@ static inline void ehci_write(void __iomem *base, u32 reg, u32 val)
 static inline u32 ehci_read(void __iomem *base, u32 reg)
 {
 	return __raw_readl(base + reg);
+}
+
+u8 omap_ehci_ulpi_read(const struct usb_hcd *hcd, u8 reg)
+{
+	unsigned reg_internal = 0;
+	u8 val;
+	int count = 2000;
+
+	reg_internal = ((reg) << EHCI_INSNREG05_ULPI_REGADD_SHIFT)
+			/* Write */
+			| (3 << EHCI_INSNREG05_ULPI_OPSEL_SHIFT)
+			/* PORTn */
+			| ((1) << EHCI_INSNREG05_ULPI_PORTSEL_SHIFT)
+			/* start ULPI access*/
+			| (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT);
+
+	ehci_write(hcd->regs, EHCI_INSNREG05_ULPI, reg_internal);
+
+	/* Wait for ULPI access completion */
+	while ((ehci_read(hcd->regs, EHCI_INSNREG05_ULPI)
+			& (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT))) {
+		udelay(1);
+		if (count-- == 0) {
+			pr_err("ehci: omap_ehci_ulpi_read: Error");
+			break;
+		}
+	}
+
+	val = ehci_read(hcd->regs, EHCI_INSNREG05_ULPI) & 0xFF;
+	return val;
+}
+
+int omap_ehci_ulpi_write(const struct usb_hcd *hcd, u8 val, u8 reg, u8 retry_times)
+{
+	unsigned reg_internal = 0;
+	int status = 0;
+	int count;
+
+again:
+	count = 2000;
+	reg_internal = val |
+			((reg) << EHCI_INSNREG05_ULPI_REGADD_SHIFT)
+			/* Write */
+			| (2 << EHCI_INSNREG05_ULPI_OPSEL_SHIFT)
+			/* PORTn */
+			| ((1) << EHCI_INSNREG05_ULPI_PORTSEL_SHIFT)
+			/* start ULPI access*/
+			| (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT);
+
+	ehci_write(hcd->regs, EHCI_INSNREG05_ULPI, reg_internal);
+
+	/* Wait for ULPI access completion */
+	while ((ehci_read(hcd->regs, EHCI_INSNREG05_ULPI)
+			& (1 << EHCI_INSNREG05_ULPI_CONTROL_SHIFT))) {
+		udelay(1);
+		if (count-- == 0) {
+			if (retry_times--) {
+				ehci_write(hcd->regs, EHCI_INSNREG05_ULPI, 0);
+				goto again;
+			} else {
+				pr_err("ehci: omap_ehci_ulpi_write: Error");
+				status = -ETIMEDOUT;
+				break;
+			}
+		}
+	}
+	return status;
 }
 
 static void omap_ehci_soft_phy_reset(struct platform_device *pdev, u8 port)
@@ -114,6 +182,9 @@ static void omap_ehci_soft_phy_reset(struct platform_device *pdev, u8 port)
  * then invokes the start() method for the HCD associated with it
  * through the hotplug entry's driver_data.
  */
+struct usb_hcd	*ghcd_omap;
+#define USBHS_OHCI_HWMODNAME    "usbhs_ohci"
+#define HCCONTROL_OFFSET	(4)
 static int ehci_hcd_omap_probe(struct platform_device *pdev)
 {
 	struct device				*dev = &pdev->dev;
@@ -121,7 +192,9 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	struct resource				*res;
 	struct usb_hcd				*hcd;
 	void __iomem				*regs;
+	void __iomem				*ohci_base;
 	struct ehci_hcd				*omap_ehci;
+	struct omap_hwmod			*oh;
 	int					ret = -ENODEV;
 	int					irq;
 	int					i;
@@ -162,6 +235,7 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 		goto err_io;
 	}
 
+	ghcd_omap = hcd;
 	hcd->rsrc_start = res->start;
 	hcd->rsrc_len = resource_size(res);
 	hcd->regs = regs;
@@ -206,6 +280,8 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	omap_ehci = hcd_to_ehci(hcd);
 	omap_ehci->sbrn = 0x20;
 
+	omap_ehci->has_smsc_ulpi_bug = 1;
+	omap_ehci->no_companion_port_handoff = 1;
 	/* we know this is the memory we want, no need to ioremap again */
 	omap_ehci->caps = hcd->regs;
 	omap_ehci->regs = hcd->regs
@@ -225,6 +301,12 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 
 	/* root ports should always stay powered */
 	ehci_port_power(omap_ehci, 1);
+
+	/* Ensure OHCI is kept in suspended state */
+	oh = omap_hwmod_lookup(USBHS_OHCI_HWMODNAME);
+	ohci_base = omap_hwmod_get_mpu_rt_va(oh);
+	__raw_writel(OHCI_USB_SUSPEND, ohci_base + HCCONTROL_OFFSET);
+	(void)__raw_readl(ohci_base + HCCONTROL_OFFSET);
 
 	return 0;
 
@@ -300,6 +382,10 @@ static int ehci_omap_bus_suspend(struct usb_hcd *hcd)
 			clk_disable(clk);
 	}
 
+	omap_pm_set_min_bus_tput(dev,
+			OCP_INITIATOR_AGENT,
+			-1);
+
 	return ret;
 }
 
@@ -319,6 +405,10 @@ static int ehci_omap_bus_resume(struct usb_hcd *hcd)
 		if (clk)
 			clk_enable(clk);
 	}
+
+	omap_pm_set_min_bus_tput(dev,
+			OCP_INITIATOR_AGENT,
+			(200*1000*4));
 
 	if (dev->parent) {
 		pm_runtime_get_sync(dev->parent);

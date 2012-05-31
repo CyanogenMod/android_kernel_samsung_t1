@@ -157,6 +157,36 @@ config BATTERY_MAX17040
 	  in handheld and portable equipment. The MAX17040 is configured
 	  to operate with a single lithium cell
 
+config USE_CHG_ADC_POLLING
+	bool "Use Charging current adc for detecting fully charged condition"
+	depends on BATTERY_MAX17040
+	default n
+	help
+	  Say Y here to enable support for using charging current adc
+	  for detecting fully charged condition.
+	  If you select this option, we will not use CHG_ING_N interrupt
+	  for detecting fully charged.
+
+config ADJUST_EVENT_CHARGING_CURRENT
+	bool "Adjust Event Charging Current"
+	depends on BATTERY_MAX17040
+	default n
+	help
+	  Say Y here to enable support for adjusting event charging current.
+	  Usually, TA charing current is adjusted to USB charging current
+	  in event situation. Charging current will be restored after
+	  event action is ended.
+
+config TEMP_BLOCK_FOR_CAM_RECORDING
+	bool "Temp Block for Camera Recording"
+	depends on ADJUST_EVENT_CHARGING_CURRENT
+	default n
+	help
+	  Say Y here to enable support for adjusting charging current
+	  while recording the movie. In specific model, charging currnet
+	  should be adjusted to reduce the heat of device. Proper temp
+	  threshold should be selected.
+
 config BATTERY_MAX17042
 	tristate "Maxim MAX17042/8997/8966 Fuel Gauge"
 	depends on I2C
@@ -166,6 +196,32 @@ config BATTERY_MAX17042
 	  to operate with a single lithium cell. MAX8997 and MAX8966 are
 	  multi-function devices that include fuel gauages that are compatible
 	  with MAX17042.
+
+config CHARGER_SMB136
+	tristate "SMB136 Charger IC"
+	depends on I2C
+	help
+	  Say Y to enable support for the SMB136 charger and sysfs.
+	  The driver supports controlling charger-enable and current-limit
+	  pins based on the status of charger connections with interrupt
+	  handlers.
+
+config CHARGER_SMB347
+	tristate "SMB347 Charger IC"
+	depends on I2C
+	help
+	  Say Y to enable support for the SMB347 charger and sysfs.
+	  The driver supports controlling charger-enable and current-limit
+	  pins based on the status of charger connections with interrupt
+	  handlers.
+
+config BATTERY_MANAGER
+	tristate "Battery Manager"
+	help
+	  Say Y to enable supprot SEC Battery manager.
+	  This driver include battery concept.
+	  Charging(Discharging) by temperature, limit timer
+	  and fully charged.
 
 config BATTERY_Z2
 	tristate "Z2 battery driver"

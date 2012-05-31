@@ -28,29 +28,9 @@
 #include <linux/slab.h>
 
 #include "omap_l3_noc.h"
+#include "board-tuna.h"
 
 #define NUM_OF_L3_MASTERS ARRAY_SIZE(l3_masters)
-
-static void l3_dump_targ_context(u32 baseaddr)
-{
-	pr_err("COREREG      : 0x%08x\n", readl(baseaddr + L3_COREREG));
-	pr_err("VERSIONREG   : 0x%08x\n", readl(baseaddr + L3_VERSIONREG));
-	pr_err("MAINCTLREG   : 0x%08x\n", readl(baseaddr + L3_MAINCTLREG));
-	pr_err("NTTPADDR_0   : 0x%08x\n", readl(baseaddr + L3_NTTPADDR_0));
-	pr_err("SVRTSTDLVL   : 0x%08x\n", readl(baseaddr + L3_SVRTSTDLVL));
-	pr_err("SVRTCUSTOMLVL: 0x%08x\n", readl(baseaddr + L3_SVRTCUSTOMLVL));
-	pr_err("MAIN         : 0x%08x\n", readl(baseaddr + L3_MAIN));
-	pr_err("HDR          : 0x%08x\n", readl(baseaddr + L3_HDR));
-	pr_err("MSTADDR      : 0x%08x\n", readl(baseaddr + L3_MSTADDR));
-	pr_err("SLVADDR      : 0x%08x\n", readl(baseaddr + L3_SLVADDR));
-	pr_err("INFO         : 0x%08x\n", readl(baseaddr + L3_INFO));
-	pr_err("SLVOFSLSB    : 0x%08x\n", readl(baseaddr + L3_SLVOFSLSB));
-	pr_err("SLVOFSMSB    : 0x%08x\n", readl(baseaddr + L3_SLVOFSMSB));
-	pr_err("CUSTOMINFO_INFO   : 0x%08x\n", readl(baseaddr + L3_CUSTOMINFO_INFO));
-	pr_err("CUSTOMINFO_MSTADDR: 0x%08x\n", readl(baseaddr + L3_CUSTOMINFO_MSTADDR));
-	pr_err("CUSTOMINFO_OPCODE : 0x%08x\n", readl(baseaddr + L3_CUSTOMINFO_OPCODE));
-	pr_err("ADDRSPACESIZELOG  : 0x%08x\n", readl(baseaddr + L3_ADDRSPACESIZELOG));
-}
 
 /*
  * Interrupt Handler for L3 error detection.
@@ -116,11 +96,25 @@ static irqreturn_t l3_interrupt_handler(int irq, void *_l3)
 				slave_addr = std_err_main_addr +
 						L3_SLAVE_ADDRESS_OFFSET;
 
-				WARN(true, "L3 standard error: SOURCE:%s at address 0x%x\n",
-					source_name, readl(slave_addr));
+				pr_err("L3 standard error: SOURCE:%s at address 0x%x MSTADDR=0x%x hdr=0x%x\n",
+						source_name, readl(slave_addr),
+						readl(base + regoffset + L3_MSTADDR),
+						readl(base + regoffset + L3_HDR));
+				WARN_ONCE(true, "L3 standard error");
 
-				l3_dump_targ_context(base + regoffset);
-
+#ifdef CONFIG_MACH_TUNA
+				/* Disable ABE L3 Interrupt on LTE boards */
+				if ((readl(base + regoffset + L3_MSTADDR) == 0xc0) &&
+					(readl(base + regoffset + L3_SLVADDR) == 0x3) &&
+					(omap4_tuna_get_type() == TUNA_TYPE_TORO)) {
+					pr_err("** Disabling ABE L3 interrupt for now....\n");
+					writel(0x1, base + regoffset + L3_MAINCTLREG);
+					writel(0x0, base + regoffset + L3_SVRTSTDLVL);
+					writel(0x0, base + regoffset + L3_SVRTCUSTOMLVL);
+					writel(0x0, base + regoffset + L3_MAIN);
+					writel(0x1F, base + regoffset + L3_ADDRSPACESIZELOG);
+				}
+#endif
 				/* clear the std error log*/
 				clear = std_err_main | CLEAR_STDERR_LOG;
 				writel(clear, std_err_main_addr);
@@ -131,8 +125,10 @@ static irqreturn_t l3_interrupt_handler(int irq, void *_l3)
 				l3_targ_stderrlog_main_name[i][err_src];
 				regoffset = targ_reg_offset[i][err_src];
 
-				WARN(true, "CUSTOM SRESP error with SOURCE:%s\n",
-							source_name);
+				pr_err("L3 CUSTOM SRESP error with SOURCE:%s info=0x%x\n",
+						source_name,
+						readl(base + regoffset + L3_CUSTOMINFO_INFO));
+				WARN_ONCE(true, "L3 custom sresp error");
 
 				masterid = readl(base + regoffset +
 					L3_CUSTOMINFO_MSTADDR);
