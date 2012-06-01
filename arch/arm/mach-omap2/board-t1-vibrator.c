@@ -33,6 +33,7 @@
 #define VIB_GPTIMER_NUM		10
 #define PWM_DUTY_MAX		1463
 #define MAX_TIMEOUT		10000 /* 10s */
+static unsigned long pwmval = 127;
 
 static struct vibrator {
 	struct wake_lock wklock;
@@ -43,29 +44,35 @@ static struct vibrator {
 	unsigned gpio_en;
 } vibdata;
 
-static void vibrator_off(void)
+static ssize_t pwmvalue_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	if (!vibdata.enabled)
-		return;
-	omap_dm_timer_stop(vibdata.gptimer);
-	gpio_set_value(vibdata.gpio_en, 0);
-	vibdata.enabled = false;
-	wake_unlock(&vibdata.wklock);
+
+	int count;
+
+	count = sprintf(buf, "%lu\n", pwmval);
+	pr_info("vibrator: pwmval: %lu\n", pwmval);
+
+	return count;
 }
 
-static int vibrator_get_time(struct timed_output_dev *dev)
+ssize_t pwmvalue_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t size)
 {
-	if (hrtimer_active(&vibdata.timer)) {
-		ktime_t r = hrtimer_get_remaining(&vibdata.timer);
-		return ktime_to_ms(r);
-	}
 
-	return 0;
+	if (kstrtoul(buf, 0, &pwmval))
+		pr_err("vibrator: error in storing pwm value\n");
+
+	pr_info("vibrator: pwmval: %lu\n", pwmval);
+
+	return size;
 }
+static DEVICE_ATTR(pwmvalue, S_IRUGO | S_IWUSR,
+		pwmvalue_show, pwmvalue_store);
 
 static int pwm_set(unsigned long force)
 {
-
 	int pwm_duty;
 
 	if (unlikely(vibdata.gptimer == NULL))
@@ -96,18 +103,65 @@ static int pwm_set(unsigned long force)
 	return 0;
 }
 
+static int t1_create_vibrator_sysfs(void)
+{
+
+	int ret;
+	struct kobject *vibrator_kobj;
+	vibrator_kobj = kobject_create_and_add("vibrator", NULL);
+	if (unlikely(!vibrator_kobj))
+		return -ENOMEM;
+
+	ret = sysfs_create_file(vibrator_kobj,
+			&dev_attr_pwmvalue.attr);
+	if (unlikely(ret < 0)) {
+		pr_err("vibrator: sysfs_create_file failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+
+}
+
+static void vibrator_off(void)
+{
+	if (!vibdata.enabled)
+		return;
+	omap_dm_timer_stop(vibdata.gptimer);
+	gpio_set_value(vibdata.gpio_en, 0);
+	vibdata.enabled = false;
+	wake_unlock(&vibdata.wklock);
+}
+
+static int vibrator_get_time(struct timed_output_dev *dev)
+{
+	if (hrtimer_active(&vibdata.timer)) {
+		ktime_t r = hrtimer_get_remaining(&vibdata.timer);
+		return ktime_to_ms(r);
+	}
+
+	return 0;
+}
+
 static void vibrator_enable(struct timed_output_dev *dev, int value)
 {
 	mutex_lock(&vibdata.lock);
 
-    // FIXME: should be user configurable
-    pwm_set(127);
+    /* make sure pwmval is between 0 and 127 */
+    if(pwmval > 127) {   
+        pwmval = 127;
+    } else if (pwmval < 0) {
+        pwmval = 0;
+    }
+
+    /* set the current pwmval */
+    pwm_set(pwmval);
 
 	/* cancel previous timer and set GPIO according to value */
 	hrtimer_cancel(&vibdata.timer);
 
 	if (value) {
-        printk("vibrator_enable(): value=%d\n", value);
+        printk("vibrator_enable(): value=%d, pwmval=%ul\n", value, pwmval);
 		wake_lock(&vibdata.wklock);
 
 		gpio_set_value(vibdata.gpio_en, 1);
@@ -172,6 +226,8 @@ static int __init vibrator_init(void)
 
 	wake_lock_init(&vibdata.wklock, WAKE_LOCK_SUSPEND, "vibrator");
 	mutex_init(&vibdata.lock);
+
+    t1_create_vibrator_sysfs();
 
 	ret = timed_output_dev_register(&to_dev);
 	if (ret < 0) {
