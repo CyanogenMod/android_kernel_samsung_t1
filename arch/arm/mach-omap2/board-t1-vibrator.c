@@ -34,6 +34,7 @@
 #define PWM_DUTY_MAX		1463
 #define MAX_TIMEOUT		10000 /* 10s */
 static unsigned long pwmval = 127;
+static unsigned long oldpwmval;
 
 static struct vibrator {
 	struct wake_lock wklock;
@@ -73,7 +74,8 @@ static DEVICE_ATTR(pwmvalue, S_IRUGO | S_IWUSR,
 
 static int pwm_set(unsigned long force)
 {
-	int pwm_duty;
+	pr_info("vibrator: pwm_set force=%lu\n", force);
+    int pwm_duty;
 
 	if (unlikely(vibdata.gptimer == NULL))
 		return -EINVAL;
@@ -155,7 +157,10 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
     }
 
     /* set the current pwmval */
-    pwm_set(pwmval);
+    if (pwmval != oldpwmval) {
+        pwm_set(pwmval);
+        oldpwmval = pwmval;
+    }
 
 	/* cancel previous timer and set GPIO according to value */
 	hrtimer_cancel(&vibdata.timer);
