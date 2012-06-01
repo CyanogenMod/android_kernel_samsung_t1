@@ -31,7 +31,7 @@
 #include "board-t1.h"
 
 #define VIB_GPTIMER_NUM		10
-#define PWM_DUTY_MAX		1450
+#define PWM_DUTY_MAX		1463
 #define MAX_TIMEOUT		10000 /* 10s */
 
 static struct vibrator {
@@ -63,14 +63,51 @@ static int vibrator_get_time(struct timed_output_dev *dev)
 	return 0;
 }
 
+static int pwm_set(unsigned long force)
+{
+
+	int pwm_duty;
+
+	if (unlikely(vibdata.gptimer == NULL))
+		return -EINVAL;
+
+	/*
+	 * Formula for matching the user space force (-127 to +127)
+	 * to Duty cycle.
+	 * Duty cycle will vary from 0 to 45('0' means 0% duty cycle,
+	 * '45' means 100% duty cycle.
+	 * Also if user space force equals to -127 then duty
+	 * cycle will be 0 (0%), if force equals to 0 duty cycle
+	 * will be 22.5(50%), if +127 then duty cycle will
+	 * be 45(100%)
+	 */
+
+	pwm_duty = ((force + 128)
+			* (PWM_DUTY_MAX >> 1)/128);
+
+	omap_dm_timer_set_load(vibdata.gptimer, 1, -PWM_DUTY_MAX);
+	omap_dm_timer_set_match(vibdata.gptimer, 1, -pwm_duty);
+	omap_dm_timer_set_pwm(vibdata.gptimer, 0, 1,
+			OMAP_TIMER_TRIGGER_OVERFLOW_AND_COMPARE);
+	omap_dm_timer_enable(vibdata.gptimer);
+	omap_dm_timer_write_counter(vibdata.gptimer, -2);
+	omap_dm_timer_save_context(vibdata.gptimer);
+
+	return 0;
+}
+
 static void vibrator_enable(struct timed_output_dev *dev, int value)
 {
 	mutex_lock(&vibdata.lock);
+
+    // FIXME: should be user configurable
+    pwm_set(127);
 
 	/* cancel previous timer and set GPIO according to value */
 	hrtimer_cancel(&vibdata.timer);
 
 	if (value) {
+        printk("vibrator_enable(): value=%d\n", value);
 		wake_lock(&vibdata.wklock);
 
 		gpio_set_value(vibdata.gpio_en, 1);
@@ -85,7 +122,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 			hrtimer_start(&vibdata.timer,
 				ns_to_ktime((u64)value * NSEC_PER_MSEC),
 				HRTIMER_MODE_REL);
-		}
+        }
 	} else {
 		vibrator_off();
 	}
@@ -108,7 +145,7 @@ static enum hrtimer_restart vibrator_timer_func(struct hrtimer *timer)
 static int __init vibrator_init(void)
 {
 	int ret;
-
+    printk("vibrator_init()\n");
 	vibdata.enabled = false;
 
 	hrtimer_init(&vibdata.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -120,8 +157,10 @@ static int __init vibrator_init(void)
 
 	ret = omap_dm_timer_set_source(vibdata.gptimer,
 		OMAP_TIMER_SRC_SYS_CLK);
-	if (ret < 0)
+	if (ret < 0) {
+        printk("vibrator_init(): timer_set_source failed\n");
 		goto err_dm_timer_src;
+    }
 
 	omap_dm_timer_set_load(vibdata.gptimer, 1, -PWM_DUTY_MAX);
 	omap_dm_timer_set_match(vibdata.gptimer, 1, -PWM_DUTY_MAX+10);
@@ -135,9 +174,11 @@ static int __init vibrator_init(void)
 	mutex_init(&vibdata.lock);
 
 	ret = timed_output_dev_register(&to_dev);
-	if (ret < 0)
+	if (ret < 0) {
+        printk("vibrator_init(): failed to register timed_output device\n");
 		goto err_to_dev_reg;
-
+    }
+    
 	return 0;
 
 err_to_dev_reg:
@@ -154,7 +195,7 @@ err_dm_timer_src:
 static int __init omap4_t1_vibrator_init(void)
 {
 	int ret;
-
+    printk("omap4_t1_vibrator_init()\n");
 	vibdata.gpio_en = omap_muxtbl_get_gpio_by_name("MOTOR_EN");
 
 	omap_mux_init_gpio(vibdata.gpio_en, OMAP_PIN_OUTPUT |
@@ -168,8 +209,10 @@ static int __init omap4_t1_vibrator_init(void)
 	gpio_direction_output(vibdata.gpio_en, 0);
 
 	ret = vibrator_init();
-	if (ret < 0)
+	if (ret < 0) {
+        printk("omap4_t1_vibrator_init(): vibrator_init() failed\n");
 		gpio_free(vibdata.gpio_en);
+    }
 
 	return ret;
 }
