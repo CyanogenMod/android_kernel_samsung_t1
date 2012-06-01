@@ -161,7 +161,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	hrtimer_cancel(&vibdata.timer);
 
 	if (value) {
-        printk("vibrator_enable(): value=%d, pwmval=%ul\n", value, pwmval);
+        pr_info("vibrator: value=%d, pwmval=%lu\n", value, pwmval);
 		wake_lock(&vibdata.wklock);
 
 		gpio_set_value(vibdata.gpio_en, 1);
@@ -199,7 +199,7 @@ static enum hrtimer_restart vibrator_timer_func(struct hrtimer *timer)
 static int __init vibrator_init(void)
 {
 	int ret;
-    printk("vibrator_init()\n");
+    pr_info("vibrator_init()\n");
 	vibdata.enabled = false;
 
 	hrtimer_init(&vibdata.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -212,7 +212,7 @@ static int __init vibrator_init(void)
 	ret = omap_dm_timer_set_source(vibdata.gptimer,
 		OMAP_TIMER_SRC_SYS_CLK);
 	if (ret < 0) {
-        printk("vibrator_init(): timer_set_source failed\n");
+        pr_err("vibrator_init(): timer_set_source failed\n");
 		goto err_dm_timer_src;
     }
 
@@ -231,7 +231,7 @@ static int __init vibrator_init(void)
 
 	ret = timed_output_dev_register(&to_dev);
 	if (ret < 0) {
-        printk("vibrator_init(): failed to register timed_output device\n");
+        pr_err("vibrator_init(): failed to register timed_output device\n");
 		goto err_to_dev_reg;
     }
     
@@ -251,7 +251,7 @@ err_dm_timer_src:
 static int __init omap4_t1_vibrator_init(void)
 {
 	int ret;
-    printk("omap4_t1_vibrator_init()\n");
+    pr_info("omap4_t1_vibrator_init()\n");
 	vibdata.gpio_en = omap_muxtbl_get_gpio_by_name("MOTOR_EN");
 
 	omap_mux_init_gpio(vibdata.gpio_en, OMAP_PIN_OUTPUT |
@@ -266,7 +266,7 @@ static int __init omap4_t1_vibrator_init(void)
 
 	ret = vibrator_init();
 	if (ret < 0) {
-        printk("omap4_t1_vibrator_init(): vibrator_init() failed\n");
+        pr_err("omap4_t1_vibrator_init(): vibrator_init() failed\n");
 		gpio_free(vibdata.gpio_en);
     }
 
