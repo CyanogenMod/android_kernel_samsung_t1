@@ -33,7 +33,7 @@
 #define VIB_GPTIMER_NUM		10
 #define PWM_DUTY_MAX		1463
 #define MAX_TIMEOUT		10000 /* 10s */
-static unsigned long pwmval = 127;
+static unsigned long pwmval = 64;
 static unsigned long oldpwmval;
 
 static struct vibrator {
