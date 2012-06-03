@@ -26,6 +26,7 @@
 #include <asm/unaligned.h>
 #include <linux/firmware.h>
 #include <linux/input/mt.h>
+#include "../keyboard/cypress-touchkey.h"
 
 #define OBJECT_TABLE_START_ADDRESS	7
 #define OBJECT_TABLE_ELEMENT_SIZE	6
@@ -392,7 +393,7 @@ static void mxt224_ta_probe(int ta_status)
 	struct mxt224_data *data = copy_data;
 
 	if (!mxt224_enabled) {
-		printk(KERN_ERR"mxt224_enabled is 0\n");
+        pr_err("[TSP] mxt224_enabled is 0\n");
 		return;
 	}
 
@@ -758,8 +759,6 @@ static int __devinit mxt224_init_touch_driver(struct mxt224_data *data)
 
 	dev_info(&data->client->dev, "family = %#02x, variant = %#02x, version "
 			"= %#02x, build = %d\n", id[0], id[1], id[2], id[3]);
-	printk(KERN_ERR"family = %#02x, variant = %#02x, version "
-			"= %#02x, build = %d\n", id[0], id[1], id[2], id[3]);
 	dev_dbg(&data->client->dev, "matrix X size = %d\n", id[4]);
 	dev_dbg(&data->client->dev, "matrix Y size = %d\n", id[5]);
 
@@ -859,10 +858,7 @@ static void report_input_data(struct mxt224_data *data)
 				MT_TOOL_FINGER, false);
 			data->fingers[i].state = MXT224_STATE_INACTIVE;
 		/* logging */
-#ifdef __TSP_DEBUG
-			printk(KERN_DEBUG "[TSP] Up[%d] %4d,%4d\n", i,
-			       data->fingers[i].x, data->fingers[i].y);
-#endif
+            pr_debug("[TSP] Up[%d] %4d,%4d\n", i, data->fingers[i].x, data->fingers[i].y);
 			continue;
 		}
 		input_mt_slot(data->input_dev, i);
@@ -885,12 +881,8 @@ static void report_input_data(struct mxt224_data *data)
 		if (data->fingers[i].state == MXT224_STATE_PRESS
 			|| data->fingers[i].state == MXT224_STATE_RELEASE) {
 #if defined(CONFIG_SAMSUNG_KERNEL_DEBUG_USER)
-			/* printk(KERN_DEBUG "[TSP] id[%d],x=%d,y=%d,"
-					"z=%d,w=%d\n",
-					i , data->fingers[i].x,
-					data->fingers[i].y,
-					data->fingers[i].z,
-					data->fingers[i].w); */
+            pr_err("[TSP] id[%d],x=%d,y=%d, z=%d,w=%d\n", i , data->fingers[i].x, 
+                    data->fingers[i].y, data->fingers[i].z, data->fingers[i].w);  
 #endif
 		}
 		if (data->fingers[i].state == MXT224_STATE_RELEASE) {
@@ -903,10 +895,14 @@ static void report_input_data(struct mxt224_data *data)
 	input_report_key(data->input_dev, ABS_MT_PRESSURE, count > 0);
 	input_sync(data->input_dev);
 
-	if (count)
+	if (count) {
 		tch_is_pressed = 1;
-	else
+    } else {
 		tch_is_pressed = 0;
+    }
+    
+    // report state to cypress-touchkey for backlight timeout
+    touchscreen_state_report(tch_is_pressed);
 
 	if (boot_or_resume) {
 		if (count >= 2 && !auto_cal_flag)
@@ -1512,7 +1508,7 @@ static int mxt224_load_fw(struct device *dev, const char *fn)
 	ret = get_object_info(data,
 			GEN_COMMANDPROCESSOR_T6, &size_one, &obj_address);
 	if (ret) {
-		printk(KERN_ERR"[TSP] fail to get object_info\n");
+		pr_err("[TSP] fail to get object_info\n");
 		return ret;
 	}
 	size_one = 1;
