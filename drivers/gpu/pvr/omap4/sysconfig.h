@@ -30,6 +30,7 @@
 #define VS_PRODUCT_NAME	"OMAP4"
 
 #if defined(SGX540) && (SGX_CORE_REV == 120)
+#define SYS_SGX_OVERCLOCK_SPEED 384000000
 #define SYS_SGX_CLOCK_SPEED		307200000
 #else
 #define SYS_SGX_CLOCK_SPEED		304742400
@@ -42,12 +43,6 @@
 #define SYS_SGX_ACTIVE_POWER_LATENCY_MS		(2)
 #endif
 
-#define SYS_SGX_HWRECOVERY_TRACE_RESET_TIME_PERIOD		5000000
-#define SYS_SGX_MAX_HWRECOVERY_OCCURANCE_COUNT			6
-
-#define SGX_ACTIVE_POWER_LATENCY_MS		(2)
-void set_sgx_apm_latency(uint new_sgx_apm_latency);
-uint get_sgx_apm_latency(void);
 
 #define SYS_OMAP4430_SGX_REGS_SYS_PHYS_BASE  0x56000000
 #define SYS_OMAP4430_SGX_REGS_SIZE           0xFFFF
