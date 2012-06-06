@@ -194,13 +194,11 @@ static int bcmsdh_sdmmc_suspend(struct device *pdev)
 
 	if (dhd_os_check_wakelock(bcmsdh_get_drvdata()))
 		return -EBUSY;
-
 #if !defined(CUSTOMER_HW_SAMSUNG)
 #if defined(OOB_INTR_ONLY)
 	bcmsdh_oob_intr_set(0);
 #endif	/* defined(OOB_INTR_ONLY) */
-#endif
-
+#endif /* !CUSTOMER_HW_SAMSUNG */
 	dhd_mmc_suspend = TRUE;
 	smp_mb();
 
@@ -215,13 +213,12 @@ static int bcmsdh_sdmmc_resume(struct device *pdev)
 	if (func->num == 2)
 		sd_err(("%s Enter\n", __FUNCTION__));
 	dhd_mmc_suspend = FALSE;
-
 #if !defined(CUSTOMER_HW_SAMSUNG)
 #if defined(OOB_INTR_ONLY)
 	if ((func->num == 2) && dhd_os_check_if_up(bcmsdh_get_drvdata()))
 		bcmsdh_oob_intr_set(1);
 #endif /* (OOB_INTR_ONLY) */
-#endif
+#endif /* !CUSTOMER_HW_SAMSUNG */
 
 	smp_mb();
 	return 0;

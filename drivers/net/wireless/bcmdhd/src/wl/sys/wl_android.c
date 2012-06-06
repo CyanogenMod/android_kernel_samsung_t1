@@ -128,7 +128,11 @@ typedef struct cmd_tlv {
 #ifdef OKC_SUPPORT
 #define CMD_OKC_SET_PMK		"SET_PMK"
 #define CMD_OKC_ENABLE		"OKC_ENABLE"
-#endif
+#endif /* OKC_SUPPORT */
+
+#ifdef CUSTOMER_HW_SAMSUNG
+#define CMD_AMPDU_MPDU "AMPDU_MPDU"
+#endif /* CUSTOMER_HW_SAMSUNG */
 
 typedef struct android_wifi_priv_cmd {
 	char *buf;
@@ -224,6 +228,9 @@ static int wl_android_set_suspendopt(struct net_device *dev, char *command, int 
 	int ret_now;
 	int ret = 0;
 
+#ifdef CUSTOMER_HW_SAMSUNG
+	if (!dhd_download_fw_on_driverload) {
+#endif /* CUSTOMER_HW_SAMSUNG */
 	suspend_flag = *(command + strlen(CMD_SETSUSPENDOPT) + 1) - '0';
 
 	if (suspend_flag != 0)
@@ -237,6 +244,9 @@ static int wl_android_set_suspendopt(struct net_device *dev, char *command, int 
 		else
 			DHD_ERROR(("%s: failed %d\n", __FUNCTION__, ret));
 	}
+#ifdef CUSTOMER_HW_SAMSUNG
+	}
+#endif /* CUSTOMER_HW_SAMSUNG */
 	return ret;
 }
 
@@ -889,6 +899,31 @@ wl_android_okc_enable(struct net_device *dev, char *command, int total_len)
 
 #endif /* OKC_ SUPPORT */
 
+#ifdef CUSTOMER_HW_SAMSUNG
+/* CMD_AMPDU_MPDU */
+static int
+wl_android_set_ampdu_mpdu(struct net_device *dev, const char* string_num)
+{
+	int err = 0;
+	int ampdu_mpdu;
+
+	ampdu_mpdu = bcm_atoi(string_num);
+
+	if (ampdu_mpdu > 32) {
+		DHD_ERROR(("%s : ampdu_mpdu MAX value is 32.\n", __FUNCTION__));
+		return -1;
+	}
+
+	DHD_ERROR(("%s : ampdu_mpdu = %d\n", __FUNCTION__, ampdu_mpdu));
+	err = wldev_iovar_setint(dev, "ampdu_mpdu", ampdu_mpdu);
+	if (err < 0) {
+		DHD_ERROR(("%s : ampdu_mpdu set error. %d\n", __FUNCTION__, err));
+		return -1;
+	}
+
+	return 0;
+}
+#endif /* CUSTOMER_HW_SAMSUNG*/
 
 int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 {
@@ -1124,6 +1159,13 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		bytes_written = wl_android_get_assoc_res_ies(net, command);
 	}
 #endif /* BCMCCX */
+#ifdef CUSTOMER_HW_SAMSUNG
+	/* CMD_AMPDU_MPDU */
+	else if (strnicmp(command, CMD_AMPDU_MPDU,strlen(CMD_AMPDU_MPDU)) == 0) {
+		int skip = strlen(CMD_AMPDU_MPDU) + 1;
+		bytes_written = wl_android_set_ampdu_mpdu(net, (const char*)command+skip);
+	}
+#endif /* CUSTOMER_HW_SAMSUNG */
 	else {
 		if ((strnicmp(command, CMD_START, strlen(CMD_START)) != 0) &&
 			(strnicmp(command, CMD_SETFWPATH, strlen(CMD_SETFWPATH)) != 0))

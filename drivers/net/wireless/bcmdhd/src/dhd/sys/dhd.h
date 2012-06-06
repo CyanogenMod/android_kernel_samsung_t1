@@ -277,9 +277,19 @@ typedef struct dhd_pub {
 				wait_event_interruptible_timeout(a, !dhd_mmc_suspend, HZ/100); \
 			} \
 		}	while (0)
+#ifdef CUSTOMER_HW_SAMSUNG
+	#define DHD_PM_RESUME_WAIT(a)       _DHD_PM_RESUME_WAIT(a, 500)
+#else
 	#define DHD_PM_RESUME_WAIT(a)		_DHD_PM_RESUME_WAIT(a, 200)
+#endif /* CUSTOMER_HW_SAMSUNG */
 	#define DHD_PM_RESUME_WAIT_FOREVER(a)	_DHD_PM_RESUME_WAIT(a, ~0)
-	#define DHD_PM_RESUME_RETURN_ERROR(a)	do { if (dhd_mmc_suspend) return a; } while (0)
+	#define DHD_PM_RESUME_RETURN_ERROR(a)	do { \
+		if (dhd_mmc_suspend) { \
+			printf("mmc in suspend yet!!!: %s %d\n", \
+					__FUNCTION__, __LINE__); \
+			return a; \
+		} \
+	} while (0)
 	#define DHD_PM_RESUME_RETURN		do { if (dhd_mmc_suspend) return; } while (0)
 
 	#define DHD_SPINWAIT_SLEEP_INIT(a) DECLARE_WAIT_QUEUE_HEAD(a);

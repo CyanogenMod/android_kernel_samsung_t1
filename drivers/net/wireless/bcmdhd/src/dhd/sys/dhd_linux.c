@@ -4575,12 +4575,13 @@ dhd_os_wd_timer(void *bus, uint wdtick)
 	/* Totally stop the timer */
 	if (!wdtick && dhd->wd_timer_valid == TRUE) {
 		dhd->wd_timer_valid = FALSE;
+		dhd_os_spin_unlock(pub, flags);
+		if (dhd)
 #ifdef DHDTHREAD
 		del_timer_sync(&dhd->timer);
 #else
 		del_timer(&dhd->timer);
 #endif /* DHDTHREAD */
-		dhd_os_spin_unlock(pub, flags);
 		return;
 	}
 

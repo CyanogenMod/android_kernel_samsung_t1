@@ -970,7 +970,7 @@ static chanspec_t wl_cfg80211_get_shared_freq(struct wiphy *wiphy)
 
 	*(u32 *) wl->extra_buf = htod32(WL_EXTRA_BUF_MAX);
 	if ((err = wldev_ioctl(dev, WLC_GET_BSS_INFO, wl->extra_buf,
-		sizeof(WL_EXTRA_BUF_MAX), false))) {
+		WL_EXTRA_BUF_MAX, false))) {
 			WL_ERR(("Failed to get associated bss info, use temp channel \n"));
 			chspec = wf_chspec_aton(WL_P2P_TEMP_CHAN);
 	}
@@ -5569,13 +5569,16 @@ static s32 wl_inform_single_bss(struct wl_priv *wl, struct wl_bss_info *bi)
 	s32 signal;
 	u32 freq;
 	s32 err = 0;
+	gfp_t aflags;
 
 	if (unlikely(dtoh32(bi->length) > WL_BSS_INFO_MAX)) {
 		WL_DBG(("Beacon is larger than buffer. Discarding\n"));
 		return err;
 	}
+
+	aflags = (in_atomic()) ? GFP_ATOMIC : GFP_KERNEL;
 	notif_bss_info = kzalloc(sizeof(*notif_bss_info) + sizeof(*mgmt)
-		- sizeof(u8) + WL_BSS_INFO_MAX, GFP_KERNEL);
+		- sizeof(u8) + WL_BSS_INFO_MAX, aflags);
 	if (unlikely(!notif_bss_info)) {
 		WL_ERR(("notif_bss_info alloc failed\n"));
 		return -ENOMEM;
@@ -7552,7 +7555,7 @@ static s32 wl_init_priv(struct wl_priv *wl)
 	spin_lock_init(&wl->cfgdrv_lock);
 	mutex_init(&wl->ioctl_buf_sync);
 	init_waitqueue_head(&wl->netif_change_event);
-	init_waitqueue_head(&wl->send_af_done_event);
+	init_completion(&wl->send_af_done);
 	init_completion(&wl->iface_disable);
 	wl_init_eq(wl);
 	err = wl_init_priv_mem(wl);

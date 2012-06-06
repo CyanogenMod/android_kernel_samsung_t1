@@ -1236,7 +1236,7 @@ dhdsdio_bussleep(dhd_bus_t *bus, bool sleep)
 	/* Going to sleep: set the alarm and turn off the lights... */
 	if (sleep) {
 		/* Don't sleep if something is pending */
-		if (bus->dpc_sched || bus->rxskip || pktq_len(&bus->txq))
+		if (bus->dpc_sched || bus->rxskip || pktq_len(&bus->txq) || bus->readframes)
 			return BCME_BUSY;
 
 
@@ -1865,7 +1865,7 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 				DHD_ERROR(("%s: Device asleep already\n", __FUNCTION__));
 			} else if (ret < 0) {
 			/* On failure, abort the command and terminate the frame */
-				DHD_INFO(("%s: sdio error %d, abort command and terminate frame.\n",
+				DHD_ERROR(("%s: sdio error %d, abort command and terminate frame.\n",
 				          __FUNCTION__, ret));
 				bus->tx_sderrs++;
 
@@ -1936,10 +1936,10 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		DHD_CTL(("%s: resumed on rxctl frame, got %d expected %d\n",
 		         __FUNCTION__, rxlen, msglen));
 	} else if (timeleft == 0) {
-		uint32 status;
+		u32 status;
 		int retry = 0;
 		R_SDREG(status, &bus->regs->intstatus, retry);
-		DHD_ERROR(("%s: resumed on timeout, intstatus = 0x%08x\n", __FUNCTION__, status));
+		DHD_ERROR(("%s: resumed on timeout, INT status=0x%08X\n", __FUNCTION__, status));
 #ifdef DHD_DEBUG
 #if !defined(CUSTOMER_HW_SAMSUNG)
 #error need debug message if dongle trap occured
@@ -5796,11 +5796,9 @@ dhd_bus_watchdog(dhd_pub_t *dhdp)
 				if (bus->dhd_idlecount >= (DHD_IDLE_TIMEOUT_MS/dhd_watchdog_ms)) {
 					DHD_TIMER(("%s: DHD Idle state!!\n", __FUNCTION__));
 
-					if (SLPAUTO_ENAB(bus)) {
-						if (!bus->readframes)
-							if (dhdsdio_bussleep(bus, TRUE) != BCME_BUSY)
-								dhd_os_wd_timer(bus->dhd, 0);
-					} else
+					if (SLPAUTO_ENAB(bus))
+						dhdsdio_bussleep(bus, TRUE);
+					else
 						dhdsdio_clkctl(bus, CLK_NONE, FALSE);
 
 					bus->dhd_idlecount = 0;

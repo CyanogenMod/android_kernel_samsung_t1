@@ -1474,7 +1474,7 @@ wl_cfgp2p_action_tx_complete(struct wl_priv *wl, struct net_device *ndev,
 					"status : %d\n", status));
 
 		if (wl_get_drv_status_all(wl, SENDING_ACT_FRM))
-			wake_up_interruptible(&wl->send_af_done_event);
+			complete(&wl->send_af_done);
 	}
 	return ret;
 }
@@ -1518,9 +1518,7 @@ wl_cfgp2p_tx_action_frame(struct wl_priv *wl, struct net_device *dev,
 		goto exit;
 	}
 
-	timeout = wait_event_interruptible_timeout(wl->send_af_done_event,
-	(wl_get_p2p_status(wl, ACTION_TX_COMPLETED) || wl_get_p2p_status(wl, ACTION_TX_NOACK)),
-	msecs_to_jiffies(MAX_WAIT_TIME));
+	timeout = wait_for_completion_timeout(&wl->send_af_done, msecs_to_jiffies(MAX_WAIT_TIME));
 
 	if (timeout > 0 && wl_get_p2p_status(wl, ACTION_TX_COMPLETED)) {
 		CFGP2P_INFO(("tx action frame operation is completed\n"));

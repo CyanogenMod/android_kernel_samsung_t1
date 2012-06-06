@@ -64,7 +64,7 @@ extern PBCMSDH_SDMMC_INSTANCE gInstance;
 
 uint sd_sdmode = SDIOH_MODE_SD4;	/* Use SD4 mode by default */
 #if defined(SDIO_F2_BLKSIZE)
-unit sd_f2_blocksize = SDIO_F2_BLKSIZE;
+uint sd_f2_blocksize = SDIO_F2_BLKSIZE;
 #else
 uint sd_f2_blocksize = 512;		/* Default blocksize */
 #endif
