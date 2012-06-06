@@ -103,7 +103,7 @@ static int cptk_i2c_write(struct cptk_data *cptk, u8 cmd,
 
 
     if (!cptk->enable) {
-        pr_info("cptk :key is not enabled.\n");
+        pr_err("cptk :key is not enabled.\n");
         return -ENODEV;
     }
 
@@ -121,7 +121,7 @@ static int cptk_i2c_write(struct cptk_data *cptk, u8 cmd,
             mutex_unlock(&cptk->i2c_lock);
             return 0;
         }
-        pr_info("cptk :i2c transfer retor for cmd:%d\n",
+        pr_debug("cptk :i2c transfer retor for cmd:%d\n",
                cmd);
         msleep(20);
     }
@@ -139,7 +139,7 @@ static int cptk_i2c_read(struct cptk_data *cptk, u8 cmd,
     struct i2c_msg msg[2];
 
     if (!cptk->enable) {
-        pr_info("cptk :key is not enabled.\n");
+        pr_err("cptk :key is not enabled.\n");
         return -ENODEV;
     }
 
@@ -161,7 +161,7 @@ static int cptk_i2c_read(struct cptk_data *cptk, u8 cmd,
             mutex_unlock(&cptk->i2c_lock);
             return 0;
         }
-        pr_info("cptk :i2c transfer retor for cmd:%d\n", cmd);
+        pr_debug("cptk :i2c transfer retor for cmd:%d\n", cmd);
         msleep(20);
     }
     mutex_unlock(&cptk->i2c_lock);
@@ -184,7 +184,7 @@ static irqreturn_t cptk_irq_thread(int irq, void *data)
             // touch led timeout on keyup
             if (touch_led_disabled == 0) {
                 if (timer_pending(&touch_led_timer) == 0 && !cptk->notification) {
-                    pr_info("cptk: %s: keyup - add_timer\n", __func__);
+                    pr_debug("cptk: %s: keyup - add_timer\n", __func__);
                     touch_led_timer.expires = jiffies + (HZ * touch_led_timeout);
                     add_timer(&touch_led_timer);
                 } else {
@@ -203,7 +203,7 @@ static irqreturn_t cptk_irq_thread(int irq, void *data)
                         cptk->enable = true;
                         enable_irq(cptk->client->irq);
                     }
-                    pr_info("cptk: %s: keydown - LED ON\n", __func__);
+                    pr_debug("cptk: %s: keydown - LED ON\n", __func__);
                     cptk_i2c_write(cptk, KEYCODE_REG, LED_ON_CMD);
                     cptk->led_status = LED_ON_CMD;
                 }
@@ -223,7 +223,7 @@ static irqreturn_t cptk_irq_thread(int irq, void *data)
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static int cptk_early_suspend(struct early_suspend *h)
 {
-    pr_info("cptk: %s\n", __func__);
+    pr_debug("cptk: %s\n", __func__);
     int i;
 
     struct cptk_data *cptk = container_of(h,
@@ -255,7 +255,7 @@ static int cptk_early_suspend(struct early_suspend *h)
 
 static int cptk_late_resume(struct early_suspend *h)
 {
-    pr_info("cptk: %s\n", __func__);
+    pr_debug("cptk: %s\n", __func__);
 
     struct cptk_data *cptk = container_of(h,
             struct cptk_data,
@@ -435,7 +435,7 @@ set_touchkey_firm_version_read_show, NULL);
 
 static void touch_led_enable(struct cptk_data *cptk)
 {
-    pr_info("cptk: %s\n", __func__);
+    pr_debug("cptk: %s\n", __func__);
 
     mutex_lock(&cptk->lock);
     if (touch_led_disabled == 0 && cptk->led_status == LED_OFF_CMD) {
@@ -446,13 +446,13 @@ static void touch_led_enable(struct cptk_data *cptk)
             enable_irq(cptk->client->irq);
         }
 
-        pr_info("cptk: %s LED ON\n", __func__);
+        pr_debug("cptk: %s LED ON\n", __func__);
         cptk_i2c_write(cptk, KEYCODE_REG, LED_ON_CMD);
         cptk->led_status = LED_ON_CMD;
 
         if (timer_pending(&touch_led_timer) == 0 && !cptk->notification) {
             // touch led timeout
-            pr_info("cptk: %s add_timer\n", __func__);
+            pr_debug("cptk: %s add_timer\n", __func__);
             touch_led_timer.expires = jiffies + (HZ * touch_led_timeout);
             add_timer(&touch_led_timer);
         }
@@ -462,12 +462,12 @@ static void touch_led_enable(struct cptk_data *cptk)
 
 static void touch_led_disable(struct cptk_data *cptk)
 {
-    pr_info("cptk: %s\n", __func__);
+    pr_debug("cptk: %s\n", __func__);
 
     mutex_lock(&cptk->lock);
     if (touch_led_disabled == 0 && !cptk->notification) {
         if (cptk->enable) {
-            pr_info("cptk: %s LED OFF\n", __func__);
+            pr_debug("cptk: %s LED OFF\n", __func__);
             
             cptk_i2c_write(cptk, KEYCODE_REG, LED_OFF_CMD);
             cptk->led_status = LED_OFF_CMD;
@@ -493,7 +493,7 @@ static ssize_t touch_led_enable_disable(struct device *dev,
         pr_err("cptk: %s err\n", __func__);
         return -EINVAL;
     }
-    pr_info("cptk: %s value=%d\n", __func__, data);
+    pr_debug("cptk: %s value=%d\n", __func__, data);
 
     if (data > 0)
         touch_led_enable(cptk);
@@ -544,14 +544,14 @@ static ssize_t touch_led_notification(struct device *dev,
         pr_err("cptk: %s err\n", __func__);
         return -EINVAL;
     }
-    pr_info("cptk: %s value=%d\n", __func__, data);
+    pr_debug("cptk: %s value=%d\n", __func__, data);
 
     if (data > 0 && touch_led_disabled == 0) {
-        pr_info("cptk: %s on\n", __func__);
+        pr_debug("cptk: %s on\n", __func__);
         cptk->notification = true;
         touch_led_enable(cptk);
     } else {
-        pr_info("cptk: %s off\n", __func__);
+        pr_debug("cptk: %s off\n", __func__);
         cptk->notification = false;
     }
 
@@ -582,7 +582,7 @@ static DEVICE_ATTR(timeout, S_IRUGO | S_IWUSR | S_IWGRP,
 
 void touch_led_timedout(unsigned long ptr)
 {
-    pr_info("cptk: %s\n", __func__);
+    pr_debug("cptk: %s\n", __func__);
     queue_work(cptk_local->wq, &cptk_local->work);
 }
 
@@ -593,7 +593,7 @@ void touch_led_timedout_work(struct work_struct *work)
     mutex_lock(&cptk->lock);
     if (!cptk->notification && touch_led_timeout != 0)
     {
-        pr_info("cptk: %s disabling touchled\n", __func__);
+        pr_debug("cptk: %s disabling touchled\n", __func__);
         cptk_i2c_write(cptk, KEYCODE_REG, LED_OFF_CMD);
         cptk->led_status = LED_OFF_CMD;
     }
@@ -605,21 +605,21 @@ void touchscreen_state_report(int state)
     if (touch_led_disabled == 0) {
         if (state == 1) {
             if(cptk_local->led_status == LED_OFF_CMD) {
-                pr_info("cptk: %s enable touchleds\n", __func__);
+                pr_debug("cptk: %s enable touchleds\n", __func__);
                 touch_led_enable(cptk_local);
             } else {
                 if (timer_pending(&touch_led_timer) == 1) {
-                    pr_info("cptk: %s mod_timer\n", __func__);
+                    pr_debug("cptk: %s mod_timer\n", __func__);
                     //del_timer(&touch_led_timer);
                     mod_timer(&touch_led_timer, jiffies + (HZ * touch_led_timeout));
                 }
             }
         } else if (state == 0 && !cptk_local->notification) {
             if (timer_pending(&touch_led_timer) == 1) {
-                pr_info("cptk: %s mod_timer\n", __func__);
+                pr_debug("cptk: %s mod_timer\n", __func__);
                 mod_timer(&touch_led_timer, jiffies + (HZ * touch_led_timeout));
             } else if (cptk_local->led_status == LED_ON_CMD){
-                pr_info("cptk: %s add_timer\n", __func__);
+                pr_debug("cptk: %s add_timer\n", __func__);
                 touch_led_timer.expires = jiffies + (HZ * touch_led_timeout);
                 add_timer(&touch_led_timer);
             }
