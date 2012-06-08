@@ -89,6 +89,7 @@ struct cptk_data {
     int touchkey_update_status;
     bool enable;
     bool notification;
+    bool calibrated;
 };
 
 static irqreturn_t cptk_irq_thread(int irq, void *data);
@@ -101,11 +102,12 @@ static int cptk_i2c_write(struct cptk_data *cptk, u8 cmd,
     struct i2c_msg msg[1];
     int retry = 2;
 
-    mutex_lock(&cptk->i2c_lock);
     if (!cptk->enable) {
         pr_err("cptk :key is not enabled.\n");
         return -ENODEV;
     }
+
+    mutex_lock(&cptk->i2c_lock);
 
     while (retry--) {
         data[0] = cmd;
@@ -238,6 +240,7 @@ static int cptk_early_suspend(struct early_suspend *h)
         if (cptk && cptk->pdata->power)
             cptk->pdata->power(0);
         cptk->enable = false;
+        cptk->calibrated = false;
 
         /* release key */
         for (i = 1; i < cptk->pdata->keymap_size; i++)
@@ -268,6 +271,7 @@ static int cptk_late_resume(struct early_suspend *h)
     pr_info("cptk: %s auto calibration...\n", __func__);
     cptk_i2c_write(cptk, KEYCODE_REG, AUTO_CAL_MODE_CMD);
     cptk_i2c_write(cptk, CMD_REG, AUTO_CAL_EN_CMD);
+    cptk->calibrated = true;
     msleep(50);
 
     if (cptk->enable) {
@@ -837,6 +841,7 @@ static int __devinit cptk_i2c_probe(struct i2c_client *client,
 
     cptk->enable = true;
     cptk->notification = false;
+    cptk->calibrated = false;
 
     cptk_i2c_read(cptk, KEYCODE_REG,
             cptk->cur_firm_ver,
@@ -860,9 +865,10 @@ static int __devinit cptk_i2c_probe(struct i2c_client *client,
     register_early_suspend(&cptk->early_suspend);
 #endif
 
-    pr_info("cptk: %s first auto calibration...\n", __func__);
+    pr_info("cptk: %s auto calibration...\n", __func__);
     cptk_i2c_write(cptk, KEYCODE_REG, AUTO_CAL_MODE_CMD);
     cptk_i2c_write(cptk, CMD_REG, AUTO_CAL_EN_CMD);
+    cptk->calibrated = true;
 
     ret = request_threaded_irq(client->irq, NULL, cptk_irq_thread,
                    IRQF_TRIGGER_LOW | IRQF_ONESHOT,
@@ -889,13 +895,6 @@ static int __devinit cptk_i2c_probe(struct i2c_client *client,
         pr_err("%s: cptk_create_sec_touchkey returned %d\n", __func__, ret);
         goto err_exit2;
     }
-
-    /* trigger autocalibration again to make sure.
-     * first one seems to fail on some phones.
-     */
-    pr_info("cptk: %s second auto calibration...\n", __func__);
-    cptk_i2c_write(cptk, KEYCODE_REG, AUTO_CAL_MODE_CMD);
-    cptk_i2c_write(cptk, CMD_REG, AUTO_CAL_EN_CMD);
 
     return 0;
 
