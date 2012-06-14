@@ -45,6 +45,7 @@
 #include <asm/mach/arch.h>
 
 #include "board-t1.h"
+#include "resetreason.h"
 #include "control.h"
 #include "mux.h"
 #include "omap4-sar-layout.h"
@@ -167,11 +168,11 @@ static struct platform_device t1_spdif_dit_device = {
 };
 
 static struct platform_device *t1_dbg_devices[] __initdata = {
-	&ramconsole_device,
 	&ramoops_device,
 };
 
 static struct platform_device *t1_devices[] __initdata = {
+	&ramconsole_device,
 	&bcm4330_bluetooth_device,
 	&t1_ion_device,
 	&t1_mcasp_device,
@@ -252,6 +253,7 @@ static void __init t1_init(void)
 	/* initialize each drivers */
 	omap4_t1_serial_init();
 	omap4_t1_pmic_init();
+    ramconsole_pdata.bootinfo = omap4_get_resetreason();
 	platform_add_devices(t1_devices, ARRAY_SIZE(t1_devices));
 	omap4_t1_sdio_init();
 	usb_musb_init(&musb_board_data);
@@ -291,11 +293,10 @@ static void __init t1_reserve(void)
 	int i;
 	int ret;
 
-	/* do the static reservations first */
+    /* do the static reservations first */
+    memblock_remove(T1_RAMCONSOLE_START, T1_RAMCONSOLE_SIZE);
+
 	if (sec_debug_get_level()) {
-#if defined(CONFIG_ANDROID_RAM_CONSOLE)
-		memblock_remove(T1_RAMCONSOLE_START, T1_RAMCONSOLE_SIZE);
-#endif
 #if defined(CONFIG_RAMOOPS)
 		memblock_remove(T1_RAMOOPS_START, T1_RAMOOPS_SIZE);
 #endif
