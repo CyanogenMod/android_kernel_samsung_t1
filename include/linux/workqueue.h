@@ -289,12 +289,16 @@ enum {
  *
  * system_freezable_wq is equivalent to system_wq except that it's
  * freezable.
+ *
+ * system_nrt_freezable_wq is equivalent to system_nrt_wq except that
+ * it's freezable.
  */
 extern struct workqueue_struct *system_wq;
 extern struct workqueue_struct *system_long_wq;
 extern struct workqueue_struct *system_nrt_wq;
 extern struct workqueue_struct *system_unbound_wq;
 extern struct workqueue_struct *system_freezable_wq;
+extern struct workqueue_struct *system_nrt_freezable_wq;
 
 extern struct workqueue_struct *
 __alloc_workqueue_key(const char *name, unsigned int flags, int max_active,
@@ -441,10 +445,5 @@ extern void freeze_workqueues_begin(void);
 extern bool freeze_workqueues_busy(void);
 extern void thaw_workqueues(void);
 #endif /* CONFIG_FREEZER */
-
-#ifdef CONFIG_WORKQUEUE_FRONT
-extern int queue_work_front(struct workqueue_struct *wq,
-			struct work_struct *work);
-#endif
 
 #endif
