@@ -235,36 +235,23 @@ int dsscomp_set_ovl(dsscomp_t comp, struct dss2_ovl_info *ovl)
 		BUG_ON(oix == comp->frm.num_ovls);
 	} else {
 		/* check if ovl is free to use */
-		if (comp->frm.num_ovls >= ARRAY_SIZE(comp->ovls)) {
-			printk(KERN_INFO "%s comp->frm.num_ovls = %d"
-			"ARRAY_SIZE(comp->ovls) = %d\n",
-			__func__, comp->frm.num_ovls,
-			ARRAY_SIZE(comp->ovls));
+		if (comp->frm.num_ovls >= ARRAY_SIZE(comp->ovls))
 			goto done;
-		}
 
 		/* not in any other displays queue */
 		if (mask & ~mgrq[ix].ovl_qmask.mask) {
 			for (i = 0; i < cdev->num_mgrs; i++) {
 				if (i == ix)
 					continue;
-				if (mgrq[i].ovl_qmask.mask & mask) {
-					printk(KERN_INFO
-					"%s mgrq[%d].ovl_qmask.mask=0x%x"
-					"mask =0x%x\n", __func__, i,
-					mgrq[i].ovl_qmask.mask, mask);
+				if (mgrq[i].ovl_qmask.mask & mask)
 					goto done;
-				}
 			}
 		}
 
 		/* and disabled (unless forced) if on another manager */
 		o = cdev->ovls[ovl->cfg.ix];
-		if (o->info.enabled && (!o->manager || o->manager->id != ix)) {
-			printk(KERN_INFO "%s o->manager->id = %d, ix = %d\n",
-						__func__, o->manager->id, ix);
+		if (o->info.enabled && (!o->manager || o->manager->id != ix))
 			goto done;
-		}
 
 		/* add overlay to composition & display */
 		comp->ovl_mask |= mask;
@@ -446,7 +433,6 @@ static u32 dsscomp_mgr_callback(void *data, int id, int status)
 		wk->comp = comp;
 		wk->status = status;
 		INIT_WORK(&wk->work, dsscomp_mgr_delayed_cb);
-		BUG_ON((unsigned long *)&wk->work.data == NULL);
 		queue_work(cb_wkq, &wk->work);
 	}
 

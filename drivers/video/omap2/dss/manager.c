@@ -930,7 +930,7 @@ static int configure_overlay(enum omap_plane plane)
 	u32 paddr;
 	int r;
 	u16 x_decim, y_decim;
-	bool five_taps = true;
+	bool five_taps;
 	u16 orig_w, orig_h, orig_outw, orig_outh;
 
 	DSSDBGF("%d", plane);
@@ -1211,8 +1211,8 @@ static int configure_dispc(void)
 		/* We don't need GO with manual update display. LCD iface will
 		 * always be turned off after frame, and new settings will be
 		 * taken in to use at next update */
-		if (!mc->manual_upd_display) {
-			if (mc->skip_init)
+		if (!mc->manual_upd_display){
+			if(mc->skip_init)
 				mc->skip_init = false;
 			else
 				dispc_go(i);
@@ -1388,9 +1388,9 @@ static void dss_completion_irq_handler(void *data, u32 mask)
 	const int num_mgrs = MAX_DSS_MANAGERS;
 	const u32 masks[] = {
 		DISPC_IRQ_FRAMEDONE | DISPC_IRQ_VSYNC,
+		DISPC_IRQ_FRAMEDONE2 | DISPC_IRQ_VSYNC2,
 		DISPC_IRQ_FRAMEDONETV | DISPC_IRQ_EVSYNC_EVEN |
-		DISPC_IRQ_EVSYNC_ODD,
-		DISPC_IRQ_FRAMEDONE2 | DISPC_IRQ_VSYNC2
+		DISPC_IRQ_EVSYNC_ODD
 	};
 	int i;
 
@@ -1428,9 +1428,9 @@ static void schedule_completion_irq(void)
 	const int num_mgrs = MAX_DSS_MANAGERS;
 	const u32 masks[] = {
 		DISPC_IRQ_FRAMEDONE | DISPC_IRQ_VSYNC,
+		DISPC_IRQ_FRAMEDONE2 | DISPC_IRQ_VSYNC2,
 		DISPC_IRQ_FRAMEDONETV | DISPC_IRQ_EVSYNC_EVEN |
-		DISPC_IRQ_EVSYNC_ODD,
-		DISPC_IRQ_FRAMEDONE2 | DISPC_IRQ_VSYNC2
+		DISPC_IRQ_EVSYNC_ODD
 	};
 	u32 mask = 0;
 	int i;
@@ -1593,11 +1593,6 @@ static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
 
 	spin_lock_irqsave(&dss_cache.lock, flags);
 
-	/* there is no GO on inactive displays */
-	if (!mgr->device ||
-	    mgr->device->state != OMAP_DSS_DISPLAY_ACTIVE)
-		wait_for_go = false;
-
 	/* disable overlays in overlay info structs and in cache */
 	for (i = 0; i < omap_dss_get_num_overlays(); i++) {
 		struct omap_overlay_info oi = { .enabled = false };
@@ -1611,11 +1606,7 @@ static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
 
 		oc = &dss_cache.overlay_cache[ovl->id];
 
-
 		/* complete unconfigured info in cache */
-		if (ovl->info_dirty)
-			dss_ovl_cb(&ovl->info.cb, i,
-				DSS_COMPLETION_ECLIPSED_SET);
 		dss_ovl_cb(&oc->cb.cache, i, DSS_COMPLETION_ECLIPSED_CACHE);
 		oc->cb.cache.fn = NULL;
 
@@ -1627,9 +1618,7 @@ static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
 
 	/* dirty manager */
 	mc = &dss_cache.manager_cache[mgr->id];
-	if (mgr->info_dirty)
-		dss_ovl_cb(&mgr->info.cb, mgr->id, DSS_COMPLETION_ECLIPSED_SET);
-	dss_ovl_cb(&mc->cb.cache, mgr->id, DSS_COMPLETION_ECLIPSED_CACHE);
+	dss_ovl_cb(&mc->cb.cache, i, DSS_COMPLETION_ECLIPSED_CACHE);
 	mc->cb.cache.fn = NULL;
 	mgr->info.cb.fn = NULL;
 	mc->dirty = true;
@@ -1663,13 +1652,25 @@ static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
 			oc = &dss_cache.overlay_cache[i];
 			if (oc->channel != mgr->id)
 				continue;
-			dss_ovl_configure_cb(&oc->cb, i, false);
-			dss_ovl_program_cb(&oc->cb, i);
-			oc->dispc_channel = oc->channel;
+			if (r && oc->dirty)
+				dss_ovl_configure_cb(&oc->cb, i, false);
+			if (oc->shadow_dirty) {
+				dss_ovl_program_cb(&oc->cb, i);
+				oc->dispc_channel = oc->channel;
+				oc->shadow_dirty = false;
+			} else {
+				pr_warn("ovl%d-shadow is not dirty\n", i);
+			}
 		}
 
-		dss_ovl_configure_cb(&mc->cb, i, false);
-		dss_ovl_program_cb(&mc->cb, i);
+		if (r && mc->dirty)
+			dss_ovl_configure_cb(&mc->cb, i, false);
+		if (mc->shadow_dirty) {
+			dss_ovl_program_cb(&mc->cb, i);
+			mc->shadow_dirty = false;
+		} else {
+			pr_warn("mgr%d-shadow is not dirty\n", mgr->id);
+		}
 	}
 
 	spin_unlock_irqrestore(&dss_cache.lock, flags);
