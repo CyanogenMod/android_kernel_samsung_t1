@@ -447,7 +447,7 @@ static void touch_led_enable(struct cptk_data *cptk)
             enable_irq(cptk->client->irq);
         }
 
-        pr_debug("cptk: %s LED ON\n", __func__);
+        pr_info("cptk: %s LED ON\n", __func__);
         cptk_i2c_write(cptk, KEYCODE_REG, LED_ON_CMD);
         cptk->led_status = LED_ON_CMD;
 
@@ -468,7 +468,7 @@ static void touch_led_disable(struct cptk_data *cptk)
     mutex_lock(&cptk->lock);
     if (touch_led_disabled == 0 && !cptk->notification) {
         if (cptk->enable) {
-            pr_debug("cptk: %s LED OFF\n", __func__);
+            pr_info("cptk: %s LED OFF\n", __func__);
             
             cptk_i2c_write(cptk, KEYCODE_REG, LED_OFF_CMD);
             cptk->led_status = LED_OFF_CMD;
@@ -480,6 +480,18 @@ static void touch_led_disable(struct cptk_data *cptk)
         }
     }
     mutex_unlock(&cptk->lock);
+}
+
+static ssize_t show_touch_led_enable_disable(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+    struct cptk_data *cptk = dev_get_drvdata(dev);
+    int ret;
+
+    ret = sprintf(buf, "%d\n", cptk->enable);
+    pr_info("cptk: %s: enable=%d\n", __func__, cptk->enable);
+
+    return ret;
 }
 
 static ssize_t touch_led_enable_disable(struct device *dev,
@@ -494,7 +506,7 @@ static ssize_t touch_led_enable_disable(struct device *dev,
         pr_err("cptk: %s err\n", __func__);
         return -EINVAL;
     }
-    pr_debug("cptk: %s value=%d\n", __func__, data);
+    pr_info("cptk: %s value=%d\n", __func__, data);
 
     if (data > 0)
         touch_led_enable(cptk);
@@ -504,7 +516,18 @@ static ssize_t touch_led_enable_disable(struct device *dev,
     return size;
 }
 static DEVICE_ATTR(enable_disable, S_IRUGO | S_IWUSR | S_IWGRP,
-        NULL, touch_led_enable_disable);
+        show_touch_led_enable_disable, touch_led_enable_disable);
+
+static ssize_t show_touch_led_force_disable(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+    int ret;
+
+    ret = sprintf(buf, "%d\n", touch_led_disabled);
+    pr_info("cptk: %s: touch_led_disabled=%d\n", __func__, touch_led_disabled);
+
+    return ret;
+}
 
 static ssize_t touch_led_force_disable(struct device *dev,
         struct device_attribute *attr, const char *buf,
@@ -531,7 +554,7 @@ static ssize_t touch_led_force_disable(struct device *dev,
     return size;
 }
 static DEVICE_ATTR(force_disable, S_IRUGO | S_IWUSR | S_IWGRP,
-        NULL, touch_led_force_disable);
+        show_touch_led_force_disable, touch_led_force_disable);
 
 static ssize_t touch_led_notification(struct device *dev,
         struct device_attribute *attr, const char *buf,
@@ -840,8 +863,9 @@ static int __devinit cptk_i2c_probe(struct i2c_client *client,
         cptk->pdata->power(1);
 
     cptk->enable = true;
-    cptk->notification = false;
     cptk->calibrated = false;
+    cptk->led_status = LED_OFF_CMD;
+    cptk->notification = false;
 
     cptk_i2c_read(cptk, KEYCODE_REG,
             cptk->cur_firm_ver,
