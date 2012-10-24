@@ -122,6 +122,51 @@ static bool __devinit fam15h_power_is_internal_node0(struct pci_dev *f4)
 	return true;
 }
 
+/*
+ * Newer BKDG versions have an updated recommendation on how to properly
+ * initialize the running average range (was: 0xE, now: 0x9). This avoids
+ * counter saturations resulting in bogus power readings.
+ * We correct this value ourselves to cope with older BIOSes.
+ */
+static const struct pci_device_id affected_device[] = {
+	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_NB_F4) },
+	{ 0 }
+};
+
+static void tweak_runavg_range(struct pci_dev *pdev)
+{
+	u32 val;
+
+	/*
+	 * let this quirk apply only to the current version of the
+	 * northbridge, since future versions may change the behavior
+	 */
+	if (!pci_match_id(affected_device, pdev))
+		return;
+
+	pci_bus_read_config_dword(pdev->bus,
+		PCI_DEVFN(PCI_SLOT(pdev->devfn), 5),
+		REG_TDP_RUNNING_AVERAGE, &val);
+	if ((val & 0xf) != 0xe)
+		return;
+
+	val &= ~0xf;
+	val |=  0x9;
+	pci_bus_write_config_dword(pdev->bus,
+		PCI_DEVFN(PCI_SLOT(pdev->devfn), 5),
+		REG_TDP_RUNNING_AVERAGE, val);
+}
+
+#ifdef CONFIG_PM
+static int fam15h_power_resume(struct pci_dev *pdev)
+{
+	tweak_runavg_range(pdev);
+	return 0;
+}
+#else
+#define fam15h_power_resume NULL
+#endif
+
 static void __devinit fam15h_power_init_data(struct pci_dev *f4,
 					     struct fam15h_power_data *data)
 {
@@ -213,6 +258,7 @@ static struct pci_driver fam15h_power_driver = {
 	.id_table = fam15h_power_id_table,
 	.probe = fam15h_power_probe,
 	.remove = __devexit_p(fam15h_power_remove),
+	.resume = fam15h_power_resume,
 };
 
 static int __init fam15h_power_init(void)
