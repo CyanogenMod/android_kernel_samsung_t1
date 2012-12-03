@@ -482,7 +482,7 @@ static void dsscomp_late_resume(struct early_suspend *h)
 static struct early_suspend early_suspend_info = {
 	.suspend = dsscomp_early_suspend,
 	.resume = dsscomp_late_resume,
-	.level = EARLY_SUSPEND_LEVEL_DISABLE_FB,
+	.level = EARLY_SUSPEND_LEVEL_DISABLE_FB - 4,
 };
 #endif
 
