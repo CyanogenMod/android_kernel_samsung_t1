@@ -127,7 +127,6 @@ static int cm3663_i2c_write(struct cm3663_data *cm3663, u8 addr, u8 val)
 static void cm3663_light_enable(struct cm3663_data *cm3663)
 {
 	u8 tmp;
-	int64_t temp_time = 0;
 	cm3663->light_count = 0;
 	cm3663->light_buffer = 0;
 	cm3663_i2c_read(cm3663, REGS_ARA, &tmp);
@@ -135,8 +134,7 @@ static void cm3663_light_enable(struct cm3663_data *cm3663)
 	cm3663_i2c_read(cm3663, REGS_ARA, &tmp);
 	cm3663_i2c_write(cm3663, REGS_INIT, reg_defaults[3]);
 	cm3663_i2c_write(cm3663, REGS_ALS_CMD, reg_defaults[1]);
-	temp_time = ktime_to_ns(cm3663->light_poll_delay) + 100000000;
-	hrtimer_start(&cm3663->light_timer, ns_to_ktime(temp_time),
+	hrtimer_start(&cm3663->light_timer, cm3663->light_poll_delay,
 						HRTIMER_MODE_REL);
 }
 
