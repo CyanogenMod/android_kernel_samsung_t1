@@ -34,8 +34,7 @@ static void touchkey_init_gpio(struct cptk_platform_data *pdata)
 {
 	gpio_direction_input(pdata->sda_pin);
 	gpio_direction_input(pdata->scl_pin);
-	gpio_direction_output(pdata->en_pin, 1);
-	gpio_direction_output(pdata->en_led_pin, 1);
+	pdata->power(true);
 	mdelay(1);
 }
 
@@ -52,7 +51,6 @@ static void touchkey_run_clk(struct cptk_platform_data *pdata,
 
 static u8 touchkey_get_data(struct cptk_platform_data *pdata)
 {
-	gpio_direction_input(pdata->sda_pin);
 	return !!gpio_get_value(pdata->sda_pin);
 }
 
@@ -232,8 +230,7 @@ static void touchkey_reset_target(struct cptk_platform_data *pdata)
 {
 	gpio_direction_input(pdata->scl_pin);
 	gpio_direction_input(pdata->sda_pin);
-	gpio_direction_output(pdata->en_pin, 0);
-	gpio_direction_output(pdata->en_led_pin, 0);
+	pdata->power(false);
 	mdelay(300);
 	touchkey_init_gpio(pdata);
 }
@@ -265,8 +262,7 @@ int touchkey_flash_firmware(struct cptk_platform_data *pdata,
 	u16 chksumdat = 0;
 	int i;
 
-	gpio_direction_output(pdata->en_pin, 0);
-	gpio_direction_output(pdata->en_led_pin, 0);
+	pdata->power(false);
 
 	if (touchkey_issp_pwr_init(pdata)) {
 		pr_err("%s: error powering up\n", __func__);
@@ -319,8 +315,7 @@ int touchkey_flash_firmware(struct cptk_platform_data *pdata,
 error_trap:
 	gpio_direction_input(pdata->scl_pin);
 	gpio_direction_input(pdata->sda_pin);
-	gpio_direction_output(pdata->en_pin, 0);
-	gpio_direction_output(pdata->en_led_pin, 0);
+	pdata->power(false);
 	mdelay(20);
 	return -1;
 }

@@ -45,15 +45,23 @@
 #define TEMP_ADC_CHANNEL		1
 #define VF_ADC_CHANNEL			0
 
+#if defined(CONFIG_RTC_CHN_ALARM_BOOT)
+#define CHARGE_FULL_ADC_PRE	388
+#define CHARGE_FULL_ADC		550 /* just use for counting */
+
+#define CHARGE_FULL_COUNT_PRE	3
+#define CHARGE_FULL_COUNT	29 /* 20 sec * (29+1) = 600 sec = 10 min : additional 10 min charging */
+#else
 #define CHARGE_FULL_ADC_PRE	388
 #define CHARGE_FULL_ADC		250 /*188*/
 
-#define CHARGE_FULL_COUNT_PRE	5
-#define CHARGE_FULL_COUNT	5
+#define CHARGE_FULL_COUNT_PRE	3
+#define CHARGE_FULL_COUNT	3
+#endif
 
 #define HIGH_BLOCK_TEMP_T1		650
 #define HIGH_RECOVER_TEMP_T1		430
-#define LOW_BLOCK_TEMP_T1		(-3)
+#define LOW_BLOCK_TEMP_T1		(-30)
 #define LOW_RECOVER_TEMP_T1		0
 
 #define TEMP_BLOCK_FOR_CAM_RECORDING_TH	390
@@ -256,17 +264,17 @@ static int get_vf_adc_value(void)
 	return twl6030_get_adc_data(VF_ADC_CHANNEL);
 }
 
-static bool check_vf_present(void)
+static int check_vf_present(void)
 {
 	int vf_adc = 0;
 	vf_adc = get_vf_adc_value();
 
 	if (vf_adc > BAT_REMOVAL_ADC_VALUE) {
 		pr_info("%s, vf_adc : %d\n", __func__, vf_adc);
-		return false;
+		return 0;
 	}
 
-	return true;
+	return 1;
 }
 
 static int check_charge_full(bool batt_chg)
@@ -302,6 +310,16 @@ static int check_charge_full(bool batt_chg)
 		} else if (check_full_pre > 0)
 			check_full_pre = 0;
 
+#if defined(CONFIG_RTC_CHN_ALARM_BOOT)
+		if (!batt_full && batt_full_pre && iset_adc < CHARGE_FULL_ADC) {
+			if (check_full >= CHARGE_FULL_COUNT) {
+				pr_info("%s : battery fully charged !!!\n",
+					__func__);
+				batt_full = true;
+			} else
+				check_full++;
+		}
+#else
 		if (!batt_full && iset_adc < CHARGE_FULL_ADC) {
 			if (check_full >= CHARGE_FULL_COUNT) {
 				pr_info("%s : battery fully charged !!!\n",
@@ -310,6 +328,7 @@ static int check_charge_full(bool batt_chg)
 			} else
 				check_full++;
 		}
+#endif
 	} else {
 		batt_full_pre = false;
 		batt_full = false;
@@ -379,7 +398,19 @@ static int charger_init(struct device *dev)
 	ret = gpio_request_array(charger_gpios, ARRAY_SIZE(charger_gpios));
 	if (ret == 0)
 		t1_init_ta_nconnected(charger_gpios[GPIO_TA_nCONNECTED].gpio);
-	return ret;
+/* zheng01.yang@ add 20120613
+hardware requrirement.
+add 1s dealy after chg_en set to high when lpm mode.
+for checking the unnormal battery
+*/
+if (sec_bootmode == 5)
+{
+        gpio_set_value(charger_gpios[GPIO_CHG_EN].gpio, 1);
+	mdelay(1000);
+        gpio_set_value(charger_gpios[GPIO_CHG_EN].gpio,0 );
+}
+/*zheng01.yang@ end */
+return ret;
 }
 
 static void charger_exit(struct device *dev)
@@ -566,7 +597,7 @@ static struct max17040_platform_data max17043_pdata = {
 	.check_temp_block_state = check_temp_block_state,
 	.set_charger_start_state = set_start_state_for_charger,
 	.skip_reset		= true,
-	.min_capacity		= 3,
+	.min_capacity		= 1,
 	.is_full_charge		= check_charge_full,
 	.get_bat_temp		= get_bat_temp_by_adc,
 	.get_charging_source	= get_charging_source,
@@ -582,7 +613,7 @@ static struct max17040_platform_data max17043_pdata = {
 	.full_charge_irq	= get_full_charge_irq,
 	.bat_removal_irq	= get_bat_removal_irq,
 	.vf_adc_value		= get_vf_adc_value,
-	.vf_present		= check_vf_present,
+	.battery_online		= check_vf_present,
 };
 
 static __initdata struct i2c_board_info max17043_i2c[] = {

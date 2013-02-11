@@ -407,7 +407,7 @@ int set_duty_nitro_interval(unsigned long val)
 		return ret;
 	nitro_interval = val;
 	mutex_unlock(&mutex_duty);
-	return;
+	return 0;
 }
 EXPORT_SYMBOL(set_duty_nitro_interval);
 
@@ -419,7 +419,7 @@ int set_duty_nitro_percentage(unsigned long val)
 		return ret;
 	nitro_percentage = val;
 	mutex_unlock(&mutex_duty);
-	return;
+	return 0;
 }
 EXPORT_SYMBOL(set_duty_nitro_percentage);
 
@@ -430,7 +430,7 @@ int set_duty_cycle_enable(unsigned long val)
 	ret = omap4_duty_cycle_set_enabled(!!val, true);
 	if (ret)
 		return ret;
-	return;
+	return 0;
 }
 EXPORT_SYMBOL(set_duty_cycle_enable);
 
@@ -442,7 +442,7 @@ int set_duty_nitro_rate(unsigned long val)
 		return ret;
 	nitro_rate = val;
 	mutex_unlock(&mutex_duty);
-	return;
+	return 0;
 }
 EXPORT_SYMBOL(set_duty_nitro_rate);
 
@@ -455,7 +455,7 @@ int set_duty_cooling_rate(unsigned long val)
 		return ret;
 	cooling_rate = val;
 	mutex_unlock(&mutex_duty);
-	return;
+	return ret;
 }
 EXPORT_SYMBOL(set_duty_cooling_rate);
 
@@ -506,7 +506,10 @@ static ssize_t show_cooling_rate(struct device *dev,
 {
 	int ret;
 
-	mutex_lock_interruptible(&mutex_duty);
+	ret = mutex_lock_interruptible(&mutex_duty);
+	if (ret == -EINTR)
+		return -EINTR;
+
 	ret = sprintf(buf, "%u\n", cooling_rate);
 	mutex_unlock(&mutex_duty);
 
@@ -519,12 +522,16 @@ static ssize_t store_cooling_rate(struct device *dev,
 					size_t count)
 {
 	unsigned long val;
+	int ret;
 
-	strict_strtoul(buf, 0, &val);
-	if (val == 0)
+	ret = strict_strtoul(buf, 0, &val);
+	if (ret < 0 || val == 0)
 		return -EINVAL;
 
-	mutex_lock_interruptible(&mutex_duty);
+	ret = mutex_lock_interruptible(&mutex_duty);
+	if (ret == -EINTR)
+		return -EINTR;
+
 	cooling_rate = val;
 	mutex_unlock(&mutex_duty);
 
@@ -679,6 +686,7 @@ disable:
 	if (enabled)
 		omap4_duty_cycle_set_enabled(false, false);
 exit:
+	destroy_workqueue(duty_wq);
 	return err;
 }
 

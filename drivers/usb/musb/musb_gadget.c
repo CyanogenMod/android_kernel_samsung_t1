@@ -330,6 +330,13 @@ static void txstate(struct musb *musb, struct musb_request *req)
 
 	musb_ep = req->ep;
 
+	/* Check if EP is disabled */
+	if (!musb_ep->desc) {
+		dev_dbg(musb->controller, "ep:%s disabled - ignore request\n",
+						musb_ep->end_point.name);
+		return;
+	}
+
 	/* we shouldn't get here while DMA is active ... but we do ... */
 	if (dma_channel_status(musb_ep->dma) == MUSB_DMA_STATUS_BUSY) {
 		dev_dbg(musb->controller, "dma pending...\n");
@@ -557,8 +564,7 @@ void musb_g_tx(struct musb *musb, u8 epnum)
 			&& (request->actual == request->length))
 #if defined(CONFIG_USB_INVENTRA_DMA) || defined(CONFIG_USB_UX500_DMA)
 			|| (is_dma && (!dma->desired_mode ||
-				(request->actual &
-					(musb_ep->packet_sz - 1))))
+				(request->actual % musb_ep->packet_sz)))
 #endif
 		) {
 			/*
@@ -570,12 +576,27 @@ void musb_g_tx(struct musb *musb, u8 epnum)
 
 			dev_dbg(musb->controller, "sending zero pkt\n");
 			musb_writew(epio, MUSB_TXCSR, MUSB_TXCSR_MODE
-					| MUSB_TXCSR_TXPKTRDY);
+					| MUSB_TXCSR_TXPKTRDY
+					| (csr & MUSB_TXCSR_P_ISO));
 			request->zero = 0;
+			/*
+			 * Return from here with the expectation of the endpoint
+			 * interrupt for further action.
+			 */
+			return;
 		}
 
 		if (request->actual == request->length) {
 			musb_g_giveback(musb_ep, request, 0);
+			/*
+			 * In the giveback function the MUSB lock is
+			 * released and acquired after sometime. During
+			 * this time period the INDEX register could get
+			 * changed by the gadget_queue function especially
+			 * on SMP systems. Reselect the INDEX to be sure
+			 * we are reading/modifying the right registers
+			 */
+			musb_ep_select(mbase, epnum);
 			req = musb_ep->desc ? next_request(musb_ep) : NULL;
 			if (!req) {
 				dev_dbg(musb->controller, "%s idle now\n",
@@ -642,6 +663,13 @@ static void rxstate(struct musb *musb, struct musb_request *req)
 		musb_ep = &hw_ep->ep_out;
 
 	len = musb_ep->packet_sz;
+
+	/* Check if EP is disabled */
+	if (!musb_ep->desc) {
+		dev_dbg(musb->controller, "ep:%s disabled - ignore request\n",
+						musb_ep->end_point.name);
+		return;
+	}
 
 	/* We shouldn't get here while DMA is active, but we do... */
 	if (dma_channel_status(musb_ep->dma) == MUSB_DMA_STATUS_BUSY) {
@@ -976,6 +1004,15 @@ void musb_g_rx(struct musb *musb, u8 epnum)
 		}
 #endif
 		musb_g_giveback(musb_ep, request, 0);
+		/*
+		 * In the giveback function the MUSB lock is
+		 * released and acquired after sometime. During
+		 * this time period the INDEX register could get
+		 * changed by the gadget_queue function especially
+		 * on SMP systems. Reselect the INDEX to be sure
+		 * we are reading/modifying the right registers
+		 */
+		musb_ep_select(mbase, epnum);
 
 		req = next_request(musb_ep);
 		if (!req)
@@ -1715,7 +1752,10 @@ static int musb_gadget_pullup(struct usb_gadget *gadget, int is_on)
 	spin_lock_irqsave(&musb->lock, flags);
 	if (is_on != musb->softconnect) {
 		musb->softconnect = is_on;
-		musb_pullup(musb, is_on);
+#ifdef CONFIG_USB_SAMSUNG_OMAP_NORPM
+		if (musb->xceiv->last_event == USB_EVENT_VBUS)
+#endif
+			musb_pullup(musb, is_on);
 	}
 	spin_unlock_irqrestore(&musb->lock, flags);
 
@@ -1724,6 +1764,18 @@ static int musb_gadget_pullup(struct usb_gadget *gadget, int is_on)
 
 	return 0;
 }
+
+#ifdef CONFIG_USB_SAMSUNG_OMAP_NORPM
+void musb_platform_pullup(struct musb *musb, int is_on)
+{
+	unsigned long	flags;
+	spin_lock_irqsave(&musb->lock, flags);
+	if (musb->softconnect)
+		musb_pullup(musb, is_on);
+	spin_unlock_irqrestore(&musb->lock, flags);
+	dev_info(musb->controller, "%s is_on=%d\n", __func__, is_on);
+}
+#endif
 
 static const struct usb_gadget_ops musb_gadget_operations = {
 	.get_frame		= musb_gadget_get_frame,
@@ -1899,7 +1951,9 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
 		retval = -ENODEV;
 		goto err0;
 	}
-
+#ifdef CONFIG_USB_SAMSUNG_OMAP_NORPM
+	musb_platform_async_resume(musb);
+#endif
 	pm_runtime_get_sync(musb->controller);
 
 	dev_dbg(musb->controller, "registering driver %s\n", driver->function);
@@ -1916,7 +1970,6 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
 	musb->gadget_driver = driver;
 	musb->g.dev.driver = &driver->driver;
 	driver->driver.bus = NULL;
-	musb->softconnect = 1;
 	spin_unlock_irqrestore(&musb->lock, flags);
 
 	retval = bind(&musb->g);
@@ -1944,6 +1997,7 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
 		 * handles power budgeting ... this way also
 		 * ensures HdrcStart is indirectly called.
 		 */
+#ifndef CONFIG_USB_SAMSUNG_OMAP_NORPM
 		retval = usb_add_hcd(musb_to_hcd(musb), -1, 0);
 		if (retval < 0) {
 			dev_dbg(musb->controller, "add_hcd failed, %d\n", retval);
@@ -1951,10 +2005,19 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
 		}
 
 		hcd->self.uses_pio_for_control = 1;
+		hcd->self.dma_align = 1;
+#endif
 	}
 
-	if (musb->xceiv->last_event == USB_EVENT_NONE)
+	if ((musb->xceiv->last_event == USB_EVENT_NONE) ||
+			(musb->xceiv->last_event == USB_EVENT_CHARGER)) {
+		musb->xceiv->state = OTG_STATE_B_IDLE;
 		pm_runtime_put(musb->controller);
+#ifdef CONFIG_USB_SAMSUNG_OMAP_NORPM
+		musb_platform_async_suspend(musb);
+#endif
+	} else
+		musb_platform_otg_notifications(musb, musb->xceiv->last_event);
 
 	return 0;
 
@@ -2013,6 +2076,26 @@ static void stop_activity(struct musb *musb, struct usb_gadget_driver *driver)
 	}
 }
 
+void musb_all_ep_flush(struct musb *musb)
+{
+	int			i;
+	struct musb_hw_ep	*hw_ep;
+
+	for (i = 0, hw_ep = musb->endpoints;
+			i < musb->nr_endpoints;
+			i++, hw_ep++) {
+		musb_ep_select(musb->mregs, i);
+		if (hw_ep->is_shared_fifo /* || !epnum */) {
+			nuke(&hw_ep->ep_in, -ESHUTDOWN);
+		} else {
+			if (hw_ep->max_packet_sz_tx)
+				nuke(&hw_ep->ep_in, -ESHUTDOWN);
+			if (hw_ep->max_packet_sz_rx)
+				nuke(&hw_ep->ep_out, -ESHUTDOWN);
+		}
+	}
+}
+
 /*
  * Unregister the gadget driver. Used by gadget drivers when
  * unregistering themselves from the controller.
@@ -2030,6 +2113,9 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	if (!musb->gadget_driver)
 		return -EINVAL;
 
+#ifdef CONFIG_USB_SAMSUNG_OMAP_NORPM
+	musb_platform_async_resume(musb);
+#endif
 	if (musb->xceiv->last_event == USB_EVENT_NONE)
 		pm_runtime_get_sync(musb->controller);
 
@@ -2075,7 +2161,9 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 		musb_stop(musb);
 
 	pm_runtime_put(musb->controller);
-
+#ifdef CONFIG_USB_SAMSUNG_OMAP_NORPM
+	musb_platform_async_suspend(musb);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(usb_gadget_unregister_driver);

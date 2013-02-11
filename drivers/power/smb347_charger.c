@@ -188,6 +188,7 @@ static void smb347_charger_init(struct smb347_chg_data *chg)
 
 	/* STATUS ingerrupt : Clear */
 	smb347_i2c_write(chg->client, SMB347_STATUS_INTERRUPT, 0x00);
+	msleep(50);
 }
 
 static int smb347_read_status(struct smb_charger_callbacks *ptr)

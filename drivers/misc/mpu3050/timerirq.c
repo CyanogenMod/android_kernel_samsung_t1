@@ -61,7 +61,7 @@ static struct miscdevice *timerirq_dev_data;
 static void timerirq_handler(unsigned long arg)
 {
 	struct timerirq_data *data = (struct timerirq_data *)arg;
-	struct timeval irqtime;
+	/* struct timeval irqtime;	*/
 
 	/* dev_info(data->dev->this_device,
 	   "%s, %ld\n", __func__, (unsigned long)data); */
@@ -70,9 +70,11 @@ static void timerirq_handler(unsigned long arg)
 
 	data->data_ready = 1;
 
+/*
 	do_gettimeofday(&irqtime);
 	data->data.irqtime = (((long long) irqtime.tv_sec) << 32);
 	data->data.irqtime += irqtime.tv_usec;
+*/
 	data->data.data_type |= 1;
 
 	wake_up_interruptible(&data->timerirq_wait);
@@ -80,8 +82,6 @@ static void timerirq_handler(unsigned long arg)
 	if (data->run)
 		mod_timer(&data->timer,
 			jiffies + msecs_to_jiffies(data->period));
-	else
-		complete(&data->timer_done);
 }
 
 static int start_timerirq(struct timerirq_data *data)
@@ -100,7 +100,6 @@ static int start_timerirq(struct timerirq_data *data)
 	data->run = TRUE;
 	data->data_ready = FALSE;
 
-	init_completion(&data->timer_done);
 	setup_timer(&data->timer, timerirq_handler, (unsigned long)data);
 
 	return mod_timer(&data->timer,
@@ -114,8 +113,7 @@ static int stop_timerirq(struct timerirq_data *data)
 
 	if (data->run) {
 		data->run = FALSE;
-		mod_timer(&data->timer, jiffies + 1);
-		wait_for_completion(&data->timer_done);
+		del_timer_sync(&data->timer);
 	}
 	return 0;
 }

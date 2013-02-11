@@ -40,12 +40,12 @@
 #include <mach/dmm.h>
 #include <mach/omap4-common.h>
 #include <mach/id.h>
+#include <mach/omap4_ion.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
 #include "board-t1.h"
-#include "resetreason.h"
 #include "control.h"
 #include "mux.h"
 #include "omap4-sar-layout.h"
@@ -55,6 +55,7 @@
 #include "sec_debug.h"
 #include "sec_getlog.h"
 #include "sec_muxtbl.h"
+#include "sec_log_buf.h"
 
 #define T1_MEM_BANK_0_SIZE	0x20000000
 #define T1_MEM_BANK_0_ADDR	0x80000000
@@ -68,6 +69,7 @@
 
 #define UART_NUM_FOR_GPS	0
 
+#if defined(CONFIG_ANDROID_RAM_CONSOLE)
 static struct resource ramconsole_resources[] = {
 	{
 		.flags  = IORESOURCE_MEM,
@@ -87,6 +89,7 @@ static struct platform_device ramconsole_device = {
 		.platform_data = &ramconsole_pdata,
 	},
 };
+#endif /* CONFIG_ANDROID_RAM_CONSOLE */
 
 static struct ramoops_platform_data ramoops_pdata = {
 	.mem_size	= T1_RAMOOPS_SIZE,
@@ -107,56 +110,6 @@ static struct platform_device bcm4330_bluetooth_device = {
 	.id = -1,
 };
 
-#define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
-#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 105)
-#define OMAP_T1_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 90)
-#define OMAP_T1_ION_HEAP_TILER_SIZE		(SZ_1M * 81)
-#define OMAP_T1_ION_HEAP_NONSECURE_TILER_SIZE	(SZ_1M * 15)
-
-#define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
-#define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - \
-				 PHYS_ADDR_DUCATI_SIZE - \
-				 OMAP_T1_ION_HEAP_SECURE_INPUT_SIZE)
-
-static struct ion_platform_data t1_ion_data = {
-	.nr	= 3,
-	.heaps = {
-		{
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.id	= OMAP_ION_HEAP_SECURE_INPUT,
-			.name	= "secure_input",
-			.base	= PHYS_ADDR_SMC_MEM
-				- OMAP_T1_ION_HEAP_SECURE_INPUT_SIZE,
-			.size	= OMAP_T1_ION_HEAP_SECURE_INPUT_SIZE,
-		},
-		{
-			.type	= OMAP_ION_HEAP_TYPE_TILER,
-			.id	= OMAP_ION_HEAP_TILER,
-			.name	= "tiler",
-			.base	= PHYS_ADDR_DUCATI_MEM
-				- OMAP_T1_ION_HEAP_TILER_SIZE,
-			.size	= OMAP_T1_ION_HEAP_TILER_SIZE,
-		},
-		{
-			.type	= OMAP_ION_HEAP_TYPE_TILER,
-			.id	= OMAP_ION_HEAP_NONSECURE_TILER,
-			.name	= "nonsecure_tiler",
-			.base	= PHYS_ADDR_DUCATI_MEM -
-					OMAP_T1_ION_HEAP_TILER_SIZE -
-					OMAP_T1_ION_HEAP_NONSECURE_TILER_SIZE,
-			.size = OMAP_T1_ION_HEAP_NONSECURE_TILER_SIZE,
-		},
-	},
-};
-
-static struct platform_device t1_ion_device = {
-	.name = "ion-omap4",
-	.id = -1,
-	.dev = {
-		.platform_data = &t1_ion_data,
-	},
-};
-
 static struct platform_device t1_mcasp_device = {
 	.name		= "omap-mcasp-dai",
 	.id		= 0,
@@ -168,13 +121,14 @@ static struct platform_device t1_spdif_dit_device = {
 };
 
 static struct platform_device *t1_dbg_devices[] __initdata = {
+#if defined(CONFIG_ANDROID_RAM_CONSOLE)
+	&ramconsole_device,
+#endif
 	&ramoops_device,
 };
 
 static struct platform_device *t1_devices[] __initdata = {
-	&ramconsole_device,
 	&bcm4330_bluetooth_device,
-	&t1_ion_device,
 	&t1_mcasp_device,
 	&t1_spdif_dit_device,
 };
@@ -241,6 +195,12 @@ static void __init omap4_t1_reboot_init(void)
 
 static void __init t1_init(void)
 {
+
+#if defined(CONFIG_MACH_SAMSUNG_T1_CHN_CMCC)	// Temp Code for IORA
+	u32 gpio_oe_reg_addr;
+	u32 reg_val;
+#endif
+
 	sec_common_init_early();
 
 	omap4_t1_emif_init();
@@ -253,7 +213,7 @@ static void __init t1_init(void)
 	/* initialize each drivers */
 	omap4_t1_serial_init();
 	omap4_t1_pmic_init();
-    ramconsole_pdata.bootinfo = omap4_get_resetreason();
+	omap4_register_ion();
 	platform_add_devices(t1_devices, ARRAY_SIZE(t1_devices));
 	omap4_t1_sdio_init();
 	usb_musb_init(&musb_board_data);
@@ -276,7 +236,47 @@ static void __init t1_init(void)
 	if (sec_debug_get_level())
 		platform_add_devices(t1_dbg_devices,
 				     ARRAY_SIZE(t1_dbg_devices));
+	
+	#if defined(CONFIG_MACH_SAMSUNG_T1_CHN_CMCC)	// Temp Code for IORA
+	gpio_request(153, "8M_nRST");
+
+	// GPIO2 (63~32)
+	gpio_oe_reg_addr = 0x48055134;
+	reg_val = omap_readl( gpio_oe_reg_addr );
+	reg_val &= 0xFFF6FFEF; // Ouput setting : GPIO_36, GPIO_48, GPIO_51
+	omap_writel( reg_val, 0x48055134 );
+
+	// GPIO3 (95~64)
+	gpio_oe_reg_addr = 0x48057134;
+	reg_val = omap_readl( gpio_oe_reg_addr );
+	reg_val &= 0xFDEBFFFF; // Ouput setting : GPIO_82, GPIO_84, GPIO_89
+	omap_writel( reg_val, 0x48057134 );
+
+	// GPIO4 (127~96)
+	gpio_oe_reg_addr = 0x48059134;
+	reg_val = omap_readl( gpio_oe_reg_addr );
+	reg_val &= 0xFF7FFE7F; // Ouput setting : GPIO_103, GPIO_104, GPIO_119
+	omap_writel( reg_val, 0x48059134 );
+
+	// GPIO5 (159~128)
+	gpio_oe_reg_addr = 0x4805B134;
+	reg_val = omap_readl( gpio_oe_reg_addr );
+	reg_val &= 0xFDFF37FF; // Ouput setting : GPIO_153, GPIO_143, GPIO_142, GPIO_139
+	omap_writel( reg_val, 0x4805B134 );
+
+	// GPIO6 (191~160)
+	gpio_oe_reg_addr = 0x4805D134;
+	reg_val = omap_readl( gpio_oe_reg_addr );
+	reg_val &= 0xFFFDBFFF; // Ouput setting : GPIO_174, GPIO_177
+	omap_writel( reg_val, 0x4805D134 );
+#endif
+
 	sec_common_init_post();
+
+#if defined(CONFIG_MACH_SAMSUNG_T1_CHN_CMCC)	// Temp Code for IORA
+	gpio_free(153);
+#endif
+
 }
 
 static void __init t1_map_io(void)
@@ -288,15 +288,29 @@ static void __init t1_map_io(void)
 				  T1_MEM_BANK_1_SIZE, T1_MEM_BANK_1_ADDR);
 }
 
+static void omap4_t1_init_carveout_sizes(
+		struct omap_ion_platform_data *ion)
+{
+	ion->tiler1d_size = (SZ_1M * 14);
+	/* WFD is not supported in T1 So the size is zero */
+	ion->secure_output_wfdhdcp_size = 0;
+	ion->ducati_heap_size = (SZ_1M * 105);
+	ion->nonsecure_tiler2d_size = (SZ_1M * 10);
+	ion->tiler2d_size = (SZ_1M * 81);
+}
+
 static void __init t1_reserve(void)
 {
-	int i;
-	int ret;
+	omap_init_ram_size();
+	omap4_t1_display_memory_init();
+	omap4_t1_init_carveout_sizes(get_omap_ion_platform_data());
+	omap_ion_init();
 
-    /* do the static reservations first */
-    memblock_remove(T1_RAMCONSOLE_START, T1_RAMCONSOLE_SIZE);
-
+	/* do the static reservations first */
 	if (sec_debug_get_level()) {
+#if defined(CONFIG_ANDROID_RAM_CONSOLE)
+		memblock_remove(T1_RAMCONSOLE_START, T1_RAMCONSOLE_SIZE);
+#endif
 #if defined(CONFIG_RAMOOPS)
 		memblock_remove(T1_RAMOOPS_START, T1_RAMOOPS_SIZE);
 #endif
@@ -304,25 +318,17 @@ static void __init t1_reserve(void)
 	memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
 	memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
 
-	for (i = 0; i < t1_ion_data.nr; i++)
-		if (t1_ion_data.heaps[i].type == ION_HEAP_TYPE_CARVEOUT ||
-		    t1_ion_data.heaps[i].type == OMAP_ION_HEAP_TYPE_TILER) {
-			ret = memblock_remove(t1_ion_data.heaps[i].base,
-					      t1_ion_data.heaps[i].size);
-			if (ret)
-				pr_err("memblock remove of %x@%lx failed\n",
-				       t1_ion_data.heaps[i].size,
-				       t1_ion_data.heaps[i].base);
-		}
-
 	/* ipu needs to recognize secure input buffer area as well */
 	omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM,
 			PHYS_ADDR_DUCATI_SIZE +
-			OMAP_T1_ION_HEAP_SECURE_INPUT_SIZE);
+			OMAP4_ION_HEAP_SECURE_INPUT_SIZE +
+			OMAP4_ION_HEAP_SECURE_OUTPUT_WFDHDCP_SIZE);
 	omap_reserve();
+
+	sec_log_buf_reserve();
 }
 
-MACHINE_START(OMAP4_SAMSUNG, "t1")
+MACHINE_START(OMAP4_SAMSUNG, "T1 Samsung board")
 	/* Maintainer: Shankar Bandal Samsung India (shankar.b@samsung.com) */
 	.boot_params	= 0x80000100,
 	.reserve	= t1_reserve,

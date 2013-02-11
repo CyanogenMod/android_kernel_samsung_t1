@@ -301,6 +301,12 @@ static void __sec_gaf_dump_one_task_info(struct task_struct *tsk, bool isMain)
 		*(int *)(pThInf + GAFINFO.thread_info_struct_cpu), (int)wchan,
 		(int)pc, (int)tsk, isMain ? '*' : ' ', tsk->comm, symname);
 
+	if (tsk->state == TASK_UNINTERRUPTIBLE)
+		pr_info("block_start: %16lld, block_max: %16lld\n",
+			tsk->se.statistics.block_start,
+			tsk->se.statistics.block_max);
+
+
 	if (tsk->state == TASK_RUNNING ||
 	    tsk->state == TASK_UNINTERRUPTIBLE || tsk->mm == NULL)
 		show_stack(tsk, NULL);
@@ -402,9 +408,9 @@ void sec_gaf_dump_cpu_stat(void)
 	}
 	sum += arch_irq_stat();
 	pr_info("");
-	pr_info(" cpu    user:%-8u nice:%-4llu system:%-4llu"
+	pr_info(" cpu    user:%-8llu nice:%-4llu system:%-4llu"
 		"idle:%-8llu iowait:%-4llu irq:%-8llu"
-		"softirq:%llu %llu %llu %llu\n", i,
+		"softirq:%llu %llu %llu %llu\n",
 		(unsigned long long)cputime64_to_clock_t(user),
 		(unsigned long long)cputime64_to_clock_t(nice),
 		(unsigned long long)cputime64_to_clock_t(system),

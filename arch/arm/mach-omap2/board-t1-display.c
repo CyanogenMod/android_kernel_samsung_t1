@@ -25,9 +25,12 @@
 
 #include <linux/platform_data/panel-ld9040.h>
 
+#include <mach/omap4_ion.h>
+
 #include <plat/omap_hwmod.h>
 #include <plat/vram.h>
 #include <plat/mcspi.h>
+#include <plat/android-display.h>
 
 #include <video/omapdss.h>
 #include <video/omap-panel-generic-dpi.h>
@@ -36,11 +39,18 @@
 #include "control.h"
 #include "mux.h"
 #include "omap_muxtbl.h"
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+#include <plat/clock.h>
+#include <linux/clk.h>
+#endif
 
 #define T1_FB_RAM_SIZE		SZ_16M /* ~800*480*4 * 2 */
 
 struct regulator *t1_oled_reg;
 struct ld9040_panel_data t1_panel_data;
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+static struct clk *dss_ick, *dss_sys_fclk, *dss_dss_fclk;
+#endif
 
 static int lcd_power_on(struct lcd_device *ld, int enable)
 {
@@ -83,7 +93,14 @@ static struct lcd_platform_data t1_oled_data = {
 	.power_off_delay = 120, /* 120ms */
 	.pdata = &t1_panel_data,
 };
-
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+static void dss_clks_disable(void)
+{
+	clk_disable(dss_ick);
+	clk_disable(dss_dss_fclk);
+	clk_disable(dss_sys_fclk);
+}
+#endif
 static struct omap_dss_device t1_oled_device = {
 	.name			= "lcd",
 	.driver_name		= "ld9040_panel",
@@ -102,8 +119,27 @@ static struct omap_dss_device t1_oled_device = {
 	},
 #endif
 	.channel		= OMAP_DSS_CHANNEL_LCD2,
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
 	.skip_init		= true,
+	.dss_clks_disable	= dss_clks_disable,
+
+#else
+	.skip_init		= false,
+#endif
+
 	.panel = {
+		.timings = {
+			.x_res = 480,
+			.y_res = 800,
+			.pixel_clock = 25600,
+			.hfp = 16,
+			.hsw = 2,
+			.hbp = 16,
+			.vfp = 10,
+			.vsw = 2,
+			.vbp = 4,
+		},
+		.acb		= 0,
 		.width_in_um	= 56000,
 		.height_in_um	= 93000,
 	},
@@ -199,13 +235,40 @@ void __init omap4_t1_display_early_init(void)
 				      | HWMOD_INIT_NO_RESET;
 }
 
+void __init omap4_t1_display_memory_init(void)
+{
+	omap_android_display_setup(&t1_dss_data,
+				   NULL,
+				   NULL,
+				   &t1_fb_pdata,
+				   get_omap_ion_platform_data());
+}
+
 #define MUX_DISPLAY_OUT (OMAP_PIN_OUTPUT | OMAP_MUX_MODE5)
 void __init omap4_t1_display_init(void)
 {
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+	dss_ick = clk_get(NULL, "ick");
+	if (IS_ERR(dss_ick)) {
+		pr_err("Could not get dss interface clock\n");
+		/* return -ENOENT; */
+	 }
+
+	dss_sys_fclk = omap_clk_get_by_name("dss_sys_clk");
+	if (IS_ERR(dss_sys_fclk)) {
+		pr_err("Could not get dss system clock\n");
+		/* return -ENOENT; */
+	}
+	clk_enable(dss_sys_fclk);
+	dss_dss_fclk = omap_clk_get_by_name("dss_dss_clk");
+	if (IS_ERR(dss_dss_fclk)) {
+		pr_err("Could not get dss functional clock\n");
+		/* return -ENOENT; */
+	 }
+#endif
+
 	omap_t1_display_gpio_init();
 
-	omap_vram_set_sdram_vram(T1_FB_RAM_SIZE, 0);
-	omapfb_set_platform_data(&t1_fb_pdata);
 	t1_hdmi_mux_init();
 	spi_register_board_info(t1_spi_board_info,
 			ARRAY_SIZE(t1_spi_board_info));
@@ -1650,8 +1713,11 @@ static const unsigned short ld9040_sm2_a2_22_30_dimming[] = {
 static const unsigned short *psm2_a2_22Gamma_set[] = {
 	ld9040_sm2_a2_22_50,
 	ld9040_sm2_a2_22_60,
+	ld9040_sm2_a2_22_60,
+	ld9040_sm2_a2_22_70,
 	ld9040_sm2_a2_22_70,
 	ld9040_sm2_a2_22_80,
+	ld9040_sm2_a2_22_90,
 	ld9040_sm2_a2_22_100,
 	ld9040_sm2_a2_22_110,
 	ld9040_sm2_a2_22_120,
@@ -1669,9 +1735,6 @@ static const unsigned short *psm2_a2_22Gamma_set[] = {
 	ld9040_sm2_a2_22_240,
 	ld9040_sm2_a2_22_250,
 	ld9040_sm2_a2_22_260,
-	ld9040_sm2_a2_22_270,
-	ld9040_sm2_a2_22_280,
-	ld9040_sm2_a2_22_290,
 	ld9040_sm2_a2_22_300,
 };
 
@@ -2435,8 +2498,11 @@ static const unsigned short ld9040_sm2_a2_19_30_dimming[] = {
 static const unsigned short *psm2_a2_19Gamma_set[] = {
 	ld9040_sm2_a2_19_50,
 	ld9040_sm2_a2_19_60,
+	ld9040_sm2_a2_19_60,
+	ld9040_sm2_a2_19_70,
 	ld9040_sm2_a2_19_70,
 	ld9040_sm2_a2_19_80,
+	ld9040_sm2_a2_19_90,
 	ld9040_sm2_a2_19_100,
 	ld9040_sm2_a2_19_110,
 	ld9040_sm2_a2_19_120,
@@ -2454,9 +2520,6 @@ static const unsigned short *psm2_a2_19Gamma_set[] = {
 	ld9040_sm2_a2_19_240,
 	ld9040_sm2_a2_19_250,
 	ld9040_sm2_a2_19_260,
-	ld9040_sm2_a2_19_270,
-	ld9040_sm2_a2_19_280,
-	ld9040_sm2_a2_19_290,
 	ld9040_sm2_a2_19_300,
 };
 
@@ -3231,8 +3294,11 @@ static const unsigned short ld9040_sm2_a1_22_30_dimming[] = {
 static const unsigned short *psm2_a1_22Gamma_set[] = {
 	ld9040_sm2_a1_22_50,
 	ld9040_sm2_a1_22_60,
+	ld9040_sm2_a1_22_60,
+	ld9040_sm2_a1_22_70,
 	ld9040_sm2_a1_22_70,
 	ld9040_sm2_a1_22_80,
+	ld9040_sm2_a1_22_90,
 	ld9040_sm2_a1_22_100,
 	ld9040_sm2_a1_22_110,
 	ld9040_sm2_a1_22_120,
@@ -3250,9 +3316,6 @@ static const unsigned short *psm2_a1_22Gamma_set[] = {
 	ld9040_sm2_a1_22_240,
 	ld9040_sm2_a1_22_250,
 	ld9040_sm2_a1_22_260,
-	ld9040_sm2_a1_22_270,
-	ld9040_sm2_a1_22_280,
-	ld9040_sm2_a1_22_290,
 	ld9040_sm2_a1_22_300,
 };
 
@@ -4036,8 +4099,11 @@ static const unsigned short ld9040_sm2_a1_19_30_dimming[] = {
 static const unsigned short *psm2_a1_19Gamma_set[] = {
 	ld9040_sm2_a1_19_50,
 	ld9040_sm2_a1_19_60,
+	ld9040_sm2_a1_19_60,
+	ld9040_sm2_a1_19_70,
 	ld9040_sm2_a1_19_70,
 	ld9040_sm2_a1_19_80,
+	ld9040_sm2_a1_19_90,
 	ld9040_sm2_a1_19_100,
 	ld9040_sm2_a1_19_110,
 	ld9040_sm2_a1_19_120,
@@ -4055,9 +4121,6 @@ static const unsigned short *psm2_a1_19Gamma_set[] = {
 	ld9040_sm2_a1_19_240,
 	ld9040_sm2_a1_19_250,
 	ld9040_sm2_a1_19_260,
-	ld9040_sm2_a1_19_270,
-	ld9040_sm2_a1_19_280,
-	ld9040_sm2_a1_19_290,
 	ld9040_sm2_a1_19_300,
 };
 

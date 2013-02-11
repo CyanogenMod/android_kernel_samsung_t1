@@ -60,11 +60,12 @@ struct clkops {
 #define RATE_IN_443X		(1 << 5)
 #define RATE_IN_TI816X		(1 << 6)
 #define RATE_IN_446X		(1 << 7)
+#define RATE_IN_447X		(1 << 8)
 
 #define RATE_IN_24XX		(RATE_IN_242X | RATE_IN_243X)
 #define RATE_IN_34XX		(RATE_IN_3430ES1 | RATE_IN_3430ES2PLUS)
 #define RATE_IN_3XXX		(RATE_IN_34XX | RATE_IN_36XX)
-#define RATE_IN_44XX		(RATE_IN_443X | RATE_IN_446X)
+#define RATE_IN_44XX		(RATE_IN_443X | RATE_IN_446X | RATE_IN_447X)
 
 /* RATE_IN_3430ES2PLUS_36XX includes 34xx/35xx with ES >=2, and all 36xx/37xx */
 #define RATE_IN_3430ES2PLUS_36XX	(RATE_IN_3430ES2PLUS | RATE_IN_36XX)
@@ -87,7 +88,7 @@ struct clkops {
 struct clksel_rate {
 	u32			val;
 	u8			div;
-	u8			flags;
+	u16			flags;
 };
 
 /**
@@ -378,7 +379,8 @@ extern int omap_clk_enable_autoidle_all(void);
 extern int omap_clk_disable_autoidle_all(void);
 
 extern const struct clkops clkops_null;
-
+extern long clk_dummy_round_rate(struct clk *clk, unsigned long rate);
+extern int clk_dummy_set_rate(struct clk *clk, unsigned long rate);
 extern struct clk dummy_ck;
 
 #endif

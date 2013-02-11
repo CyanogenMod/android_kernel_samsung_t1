@@ -108,8 +108,6 @@ void radeon_driver_irq_uninstall_kms(struct drm_device *dev)
 	radeon_irq_set(rdev);
 }
 
-<<<<<<< HEAD
-=======
 static bool radeon_msi_ok(struct radeon_device *rdev)
 {
 	/* RV370/RV380 was first asic with MSI support */
@@ -142,17 +140,13 @@ static bool radeon_msi_ok(struct radeon_device *rdev)
 	/* Dell RS690 only seems to work with MSIs. */
 	if ((rdev->pdev->device == 0x791f) &&
 	    (rdev->pdev->subsystem_vendor == 0x1028) &&
-	    (rdev->pdev->subsystem_device == 0x01fd))
+	    (rdev->pdev->subsystem_device == 0x01fc))
 		return true;
 
-	/* Gateway RS690 only seems to work with MSIs. */
+	/* Dell RS690 only seems to work with MSIs. */
 	if ((rdev->pdev->device == 0x791f) &&
-	    (rdev->pdev->subsystem_vendor == 0x107b) &&
-	    (rdev->pdev->subsystem_device == 0x0185))
-		return true;
-
-	/* try and enable MSIs by default on all RS690s */
-	if (rdev->family == CHIP_RS690)
+	    (rdev->pdev->subsystem_vendor == 0x1028) &&
+	    (rdev->pdev->subsystem_device == 0x01fd))
 		return true;
 
 	/* RV515 seems to have MSI issues where it loses
@@ -172,7 +166,6 @@ static bool radeon_msi_ok(struct radeon_device *rdev)
 	return true;
 }
 
->>>>>>> linux-3.0.y
 int radeon_irq_kms_init(struct radeon_device *rdev)
 {
 	int i;
@@ -189,12 +182,8 @@ int radeon_irq_kms_init(struct radeon_device *rdev)
 	}
 	/* enable msi */
 	rdev->msi_enabled = 0;
-	/* MSIs don't seem to work reliably on all IGP
-	 * chips.  Disable MSI on them for now.
-	 */
-	if ((rdev->family >= CHIP_RV380) &&
-	    ((!(rdev->flags & RADEON_IS_IGP)) || (rdev->family >= CHIP_PALM)) &&
-	    (!(rdev->flags & RADEON_IS_AGP))) {
+
+	if (radeon_msi_ok(rdev)) {
 		int ret = pci_enable_msi(rdev->pdev);
 		if (!ret) {
 			rdev->msi_enabled = 1;

@@ -23,6 +23,7 @@ struct batman_platform_data {
 	int bootmode;
 	int ta_gpio;
 	int jig_on;
+	int vbus_gpio;
 	int (*get_temp_adc)(void);
 	int (*get_temp)(void);
 	void (*register_callbacks)(struct battery_manager_callbacks *ptr);
@@ -35,8 +36,13 @@ struct batman_platform_data {
 	void (*set_charger_en)(int state);
 	void (*fg_adjust_capacity)(void);
 	void (*update_fullcap_value)(void);
+	int (*get_fg_register)(u8 addr);
 	void (*full_charger_comp)(u32 is_recharging, u32 pre_update);
 	int (*get_charger_type)(void);
+	void (*get_charger_register)(void);
+	void (*set_charger_voreg)(void);
+	void (*set_control_800mA)(void);
+	void (*set_control_limit)(void);
 	int high_block_temp;
 	int high_recover_temp;
 	int low_block_temp;
@@ -44,6 +50,9 @@ struct batman_platform_data {
 	int recharge_voltage;
 	int limit_charging_time;   /* 6hour */
 	int limit_recharging_time;  /* 90min */
+	void (*set_term_current)(int term_type);
+	void (*set_charge_current)(int cable_type);
+	int bat_removal;
 };
 
 #endif

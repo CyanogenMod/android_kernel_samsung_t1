@@ -70,9 +70,11 @@ struct fsa9480_platform_data {
 	void				(*desk_dock_charger_removal)(u8);
 	int                             external_vbus_irq;
 	unsigned long                   external_vbus_flags;
+	void				(*save_dev_adc)(u16 dev, u8 adc);
 };
 
 extern struct class *sec_class;
 
 int fsa9480_set_switch(void *usbsw, const char *buf);
+void fsa9480_set_raw_data_bit(void *usbsw);
 #endif

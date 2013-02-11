@@ -40,7 +40,6 @@ struct max17040_platform_data {
 	int (*full_charge_irq)(void);
 	int (*bat_removal_irq) (void);
 	int (*vf_adc_value) (void);
-	bool (*vf_present) (void);
 };
 
 #endif

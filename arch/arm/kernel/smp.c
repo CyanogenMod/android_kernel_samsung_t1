@@ -328,9 +328,7 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
 	smp_store_cpu_info(cpu);
 
 	/*
-	 * OK, now it's safe to let the boot CPU continue.  Wait for
-	 * the CPU migration code to notice that the CPU is online
-	 * before we continue.
+	 * OK, now it's safe to let the boot CPU continue.
 	 */
 	set_cpu_online(cpu, true);
 
@@ -339,13 +337,6 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
 	 */
 	percpu_timer_setup();
 
-	while (!cpu_active(cpu))
-		cpu_relax();
-
-	/*
-	 * cpu_active bit is set, so it's safe to enable interrupts
-	 * now.
-	 */
 	local_irq_enable();
 	local_fiq_enable();
 
@@ -478,6 +469,8 @@ asmlinkage void __exception_irq_entry do_local_timer(struct pt_regs *regs)
 {
 	struct pt_regs *old_regs = set_irq_regs(regs);
 	int cpu = smp_processor_id();
+
+	sec_debug_irq_regs_log(cpu, regs);
 
 	if (local_timer_ack()) {
 		__inc_irq_stat(cpu, local_timer_irqs);
@@ -654,6 +647,7 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 	if (ipinr >= IPI_TIMER && ipinr < IPI_TIMER + NR_IPI)
 		__inc_irq_stat(cpu, ipi_irqs[ipinr - IPI_TIMER]);
 
+	sec_debug_irq_regs_log(cpu, regs);
 	sec_debug_irq_log(ipinr, do_IPI, 1);
 
 	switch (ipinr) {
@@ -683,6 +677,10 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 		irq_enter();
 		ipi_cpu_stop(cpu);
 		irq_exit();
+		break;
+
+	case IPI_CPU_BACKTRACE:
+		ipi_cpu_backtrace(cpu, regs);
 		break;
 
 	default:

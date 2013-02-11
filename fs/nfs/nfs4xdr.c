@@ -5745,8 +5745,7 @@ static int nfs4_xdr_dec_open(struct rpc_rqst *rqstp, struct xdr_stream *xdr,
 	status = decode_open(xdr, res);
 	if (status)
 		goto out;
-	status = decode_getfh(xdr, &res->fh);
-	if (status)
+	if (decode_getfh(xdr, &res->fh) != 0)
 		goto out;
 	if (decode_getfattr(xdr, res->f_attr, res->server,
 				!RPC_IS_ASYNC(rqstp->rq_task)) != 0)

@@ -849,7 +849,7 @@ static int __init hsi_platform_device_probe(struct platform_device *pd)
 			" %d\n", err);
 		goto rollback1;
 	}
-	/* Wakeup dependency was disabled for HSI <-> MPU PM_L3INIT_HSI_WKDEP */
+
 	pm_runtime_enable(hsi_ctrl->dev);
 	pm_runtime_irq_safe(hsi_ctrl->dev);
 	hsi_clocks_enable(hsi_ctrl->dev, __func__);
@@ -902,7 +902,7 @@ static int __init hsi_platform_device_probe(struct platform_device *pd)
 	} else if (err) {
 		dev_err(&pd->dev, "%s: Error %d setting HSI FClk to %ld.\n",
 				__func__, err, pdata->default_hsi_fclk);
-		goto rollback3;
+		goto rollback4;
 	} else {
 		hsi_ctrl->hsi_fclk_current = pdata->default_hsi_fclk;
 	}
@@ -911,6 +911,8 @@ static int __init hsi_platform_device_probe(struct platform_device *pd)
 
 	return 0;
 
+rollback4:
+	unregister_hsi_devices(hsi_ctrl);
 rollback3:
 	hsi_debug_remove_ctrl(hsi_ctrl);
 rollback2:
@@ -1059,9 +1061,6 @@ int hsi_runtime_resume(struct device *dev)
 	/* Restore context */
 	hsi_restore_ctx(hsi_ctrl);
 
-	/* Allow data reception */
-	hsi_hsr_resume(hsi_ctrl);
-
 	/* HSI device is now fully operational and _must_ be able to */
 	/* complete I/O operations */
 
@@ -1090,9 +1089,6 @@ int hsi_runtime_suspend(struct device *dev)
 	hsi_save_ctx(hsi_ctrl);
 
 	hsi_ctrl->clock_enabled = false;
-
-	/* Forbid data reception */
-	hsi_hsr_suspend(hsi_ctrl);
 
 	/* HSI is now ready to be put in low power state */
 

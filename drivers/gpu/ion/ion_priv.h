@@ -190,6 +190,7 @@ struct ion_heap_ops {
  *			allocating.  These are specified by platform data and
  *			MUST be unique
  * @name:		used for debugging
+ * @priv:		private heap data
  *
  * Represents a pool of memory from which buffers can be made.  In some
  * systems the only heap is regular system memory allocated via vmalloc.
@@ -203,6 +204,7 @@ struct ion_heap {
 	struct ion_heap_ops *ops;
 	int id;
 	const char *name;
+	void *priv;
 };
 
 /**
@@ -259,5 +261,18 @@ void ion_carveout_free(struct ion_heap *heap, ion_phys_addr_t addr,
  * physical address, this is used to indicate allocation failed
  */
 #define ION_CARVEOUT_ALLOCATE_FAIL -1
+
+/**
+ * Flushing entire cache is more efficient than flushing virtual address
+ * range of a buffer whose size is 200Kbytes or higher, since line by
+ * line operations of huge buffers consume lot of cpu cycles
+ */
+#define FULL_CACHE_FLUSH_THRESHOLD 200000
+
+enum cache_operation {
+	CACHE_CLEAN		= 0x0,
+	CACHE_INVALIDATE	= 0x1,
+	CACHE_FLUSH		= 0x2,
+};
 
 #endif /* _ION_PRIV_H */

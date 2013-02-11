@@ -47,7 +47,7 @@
 #define FW_SIZE     8192
 
 /*
- * Melfas touchkey register
+ * Cypress touchkey register
  */
 #define KEYCODE_REG         0x00
 #define CMD_REG             0x03
@@ -833,13 +833,13 @@ static int __devinit cptk_i2c_probe(struct i2c_client *client,
         goto err_exit1;
     }
     cptk->client = client;
-    strlcpy(cptk->client->name, "melfas-touchkey",
+    strlcpy(cptk->client->name, "cypress-touchkey",
             I2C_NAME_SIZE);
     cptk->client->dev.init_name = DEVICE_NAME;
     i2c_set_clientdata(client, cptk);
 
     cptk->input_dev->name = DEVICE_NAME;
-    cptk->input_dev->phys = "melfas-touchkey/input0";
+    cptk->input_dev->phys = "cypress-touchkey/input0";
     cptk->input_dev->id.bustype = BUS_HOST;
 
     set_bit(EV_SYN, cptk->input_dev->evbit);
@@ -934,7 +934,7 @@ static int __devexit cptk_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id cptk_id[] = {
-    {"melfas_touchkey", 0},
+    {"cypress_touchkey", 0},
     {}
 };
 MODULE_DEVICE_TABLE(i2c, cptk_id);
@@ -942,7 +942,7 @@ MODULE_DEVICE_TABLE(i2c, cptk_id);
 static struct i2c_driver cptk_i2c_driver = {
     .driver = {
         .owner = THIS_MODULE,
-        .name = "melfas_touchkey",
+        .name = "cypress_touchkey",
     },
     .id_table = cptk_id,
     .probe = cptk_i2c_probe,
@@ -974,4 +974,4 @@ module_init(cptk_init);
 module_exit(cptk_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("shankar bandal <shankar.b@samsung.com>");
-MODULE_DESCRIPTION("melfas touch keypad");
+MODULE_DESCRIPTION("cypress touch keypad");

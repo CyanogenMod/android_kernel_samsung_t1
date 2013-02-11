@@ -27,6 +27,7 @@
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
+#include <linux/workqueue.h>
 
 #include <../../../drivers/staging/android/timed_output.h>
 #include <linux/sec-vibrator.h>
@@ -99,6 +100,8 @@ struct secvib_data {
 	 * correct logic in secvib_write
 	 */
 	char *write_buf;
+	struct workqueue_struct *vib_wq;
+	struct work_struct vib_work;
 };
 
 static int secvib_vibrator_enable(struct secvib_data *secvib,
@@ -123,12 +126,20 @@ static int secvib_vibrator_enable(struct secvib_data *secvib,
 	return ret;
 }
 
+static void secvib_timer_worker(struct work_struct *work)
+{
+	struct secvib_data *secvib =
+		container_of(work, struct secvib_data, vib_work);
+
+	secvib_vibrator_enable(secvib, 0, 0);
+}
+
 static enum hrtimer_restart secvib_timer_func(struct hrtimer *timer)
 {
 	struct secvib_data *secvib =
 		container_of(timer, struct secvib_data, timer);
 
-	secvib_vibrator_enable(secvib, 0, 0);
+	queue_work(secvib->vib_wq, &secvib->vib_work);
 	return HRTIMER_NORESTART;
 }
 
@@ -761,6 +772,14 @@ static int secvib_probe(struct platform_device *pdev)
 		secvib->actr_buf[i].samples_buf[1].bufsize = 0;
 	}
 
+	secvib->vib_wq = create_workqueue("secvib");
+	if (unlikely(!secvib->vib_wq)) {
+		pr_err("secvib: failed to create workqueue\n");
+		ret = -EINVAL;
+		goto err_to_dev_reg;
+	}
+	INIT_WORK(&secvib->vib_work, secvib_timer_worker);
+
 	platform_set_drvdata(pdev, secvib);
 	return 0;
 
@@ -779,9 +798,27 @@ static int secvib_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int secvib_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct secvib_data *secvib = platform_get_drvdata(pdev);
+	int i;
+
+	for (i = 0; i < secvib->pdata->num_actuators; i++)
+		secvib->pdata->vib_enable(i, 0);
+
+	return 0;
+}
+
+static int secvib_resume(struct platform_device *pdev)
+{
+	return 0;
+}
+
 static struct platform_driver secvib_driver = {
 	.probe		= secvib_probe,
 	.remove		= secvib_remove,
+	.suspend		= secvib_suspend,
+	.resume		= secvib_resume,
 	.driver		= {
 		.name		= VIB_DEVNAME,
 		.owner		= THIS_MODULE,

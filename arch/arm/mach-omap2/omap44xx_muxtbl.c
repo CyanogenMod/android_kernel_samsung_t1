@@ -37,12 +37,14 @@ static int __init omap4_muxtbl_is_pbias_gpio(struct omap_board_mux *mux)
 		OMAP4_MUX(SIM_CLK, OMAP_MUX_MODE3),
 		OMAP4_MUX(SIM_RESET, OMAP_MUX_MODE3),
 	};
-	int i = 0;
+	unsigned int i = ARRAY_SIZE(wkup_mux) - 1;
 
-	for (i = 0; i < ARRAY_SIZE(wkup_mux); i++)
+	do {
 		if (wkup_mux[i].reg_offset == mux->reg_offset &&
 		    (wkup_mux[i].value & mux->value))
 			return 0;
+	} while (i-- != 0);
+
 	return -1;
 }
 
@@ -144,16 +146,16 @@ static void __init omap_muxtbl_set_usbbx_gpio(struct omap_muxtbl *muxtbl)
 
 	switch (muxtbl->gpio.gpio) {
 	case 96:	/* usbb1_hsic_data */
-		shift = 20;
+		shift = OMAP4_USBB1_HSIC_DATA_WD_SHIFT;
 		break;
 	case 97:	/* usbb1_hsic_strobe */
-		shift = 18;
+		shift = OMAP4_USBB1_HSIC_STROBE_WD_SHIFT;
 		break;
 	case 169:	/* usbb2_hsic_data */
-		shift = 16;
+		shift = OMAP4_USBB2_HSIC_DATA_WD_SHIFT;
 		break;
 	case 170:	/* usbb2_hsic_strobe */
-		shift = 14;
+		shift = OMAP4_USBB2_HSIC_STROBE_WD_SHIFT;
 		break;
 	default:
 		return;

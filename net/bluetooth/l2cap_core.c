@@ -419,10 +419,9 @@ static void l2cap_chan_del(struct l2cap_chan *chan, int err)
 	}
 		/* END SS_BLUEZ_BT */
 
-		if (conn->hcon) {
+		if (conn->hcon)
 			conn->hcon->out = 1;
-			hci_conn_put(conn->hcon);
-		}
+		hci_conn_put(conn->hcon);
 	}
 
 	l2cap_state_change(chan, BT_CLOSED);

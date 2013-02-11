@@ -17,14 +17,13 @@
 
 #include <linux/serial_core.h>
 
+#include "sec_board_id.h"
 #include "sec_common.h"
-#define SEC_MACHINE_T1		0x00
 
 /** @category LCD, HDMI */
 void omap4_t1_display_init(void);
-
-/** @category LCD */
-void __init omap4_t1_display_early_init(void);
+void omap4_t1_display_early_init(void);
+void omap4_t1_display_memory_init(void);
 
 /** @category Key, TSP, Touch-Key */
 void omap4_t1_input_init(void);

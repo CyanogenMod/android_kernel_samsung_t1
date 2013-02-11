@@ -41,7 +41,9 @@ enum usb_xceiv_events {
 	USB_EVENT_ID,           /* id was grounded */
 	USB_EVENT_CHARGER,      /* usb dedicated charger */
 	USB_EVENT_ENUMERATED,   /* gadget driver enumerated */
-	USB_EVENT_HOST_NONE,
+	USB_EVENT_HOST_NONE,	/* usb host disconnected */
+	USB_EVENT_VBUS_CHARGER,	/* ta/usb event */
+	USB_EVENT_CHARGER_NONE,	/* TA disconnected */
 };
 
 struct otg_transceiver;

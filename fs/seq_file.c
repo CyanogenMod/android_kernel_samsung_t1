@@ -9,6 +9,7 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 
 #include <asm/uaccess.h>
 #include <asm/page.h>
@@ -62,6 +63,32 @@ int seq_open(struct file *file, const struct seq_operations *op)
 }
 EXPORT_SYMBOL(seq_open);
 
+/**
+ *	seq_reserve -	increase initial buffer for sequential file
+ *	@m:	target buffer
+ *	@size: size in bytes to reserve
+ *
+ *	seq_reserve() increases the initial size of the seq_file buffer.  Can
+ *	be used to avoid future allocations and repeated calls to the show
+ *	function for large buffers of known size.
+ *	Returns 0 on success, or -ENOMEM if the buffer cannot be allocated.
+ */
+int seq_reserve(struct seq_file *m, size_t size)
+{
+	void *buf;
+
+	buf = vmalloc(size);
+	if (!buf)
+		return -ENOMEM;
+
+	vfree(m->buf);
+	m->buf = buf;
+	m->size = size;
+
+	return 0;
+}
+EXPORT_SYMBOL(seq_reserve);
+
 static int traverse(struct seq_file *m, loff_t offset)
 {
 	loff_t pos = 0, index;
@@ -76,7 +103,7 @@ static int traverse(struct seq_file *m, loff_t offset)
 		return 0;
 	}
 	if (!m->buf) {
-		m->buf = kmalloc(m->size = PAGE_SIZE, GFP_KERNEL);
+		m->buf = vmalloc(m->size = PAGE_SIZE);
 		if (!m->buf)
 			return -ENOMEM;
 	}
@@ -115,8 +142,8 @@ static int traverse(struct seq_file *m, loff_t offset)
 
 Eoverflow:
 	m->op->stop(m, p);
-	kfree(m->buf);
-	m->buf = kmalloc(m->size <<= 1, GFP_KERNEL);
+	vfree(m->buf);
+	m->buf = vmalloc(m->size <<= 1);
 	return !m->buf ? -ENOMEM : -EAGAIN;
 }
 
@@ -169,7 +196,7 @@ ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 	m->version = file->f_version;
 	/* grab buffer if we didn't have one */
 	if (!m->buf) {
-		m->buf = kmalloc(m->size = PAGE_SIZE, GFP_KERNEL);
+		m->buf = vmalloc(m->size = PAGE_SIZE);
 		if (!m->buf)
 			goto Enomem;
 	}
@@ -209,8 +236,8 @@ ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 		if (m->count < m->size)
 			goto Fill;
 		m->op->stop(m, p);
-		kfree(m->buf);
-		m->buf = kmalloc(m->size <<= 1, GFP_KERNEL);
+		vfree(m->buf);
+		m->buf = vmalloc(m->size <<= 1);
 		if (!m->buf)
 			goto Enomem;
 		m->count = 0;
@@ -325,7 +352,7 @@ EXPORT_SYMBOL(seq_lseek);
 int seq_release(struct inode *inode, struct file *file)
 {
 	struct seq_file *m = file->private_data;
-	kfree(m->buf);
+	vfree(m->buf);
 	kfree(m);
 	return 0;
 }
@@ -449,8 +476,6 @@ EXPORT_SYMBOL(seq_path);
 
 /*
  * Same as seq_path, but relative to supplied root.
- *
- * root may be changed, see __d_path().
  */
 int seq_path_root(struct seq_file *m, struct path *path, struct path *root,
 		  char *esc)
@@ -463,6 +488,8 @@ int seq_path_root(struct seq_file *m, struct path *path, struct path *root,
 		char *p;
 
 		p = __d_path(path, root, buf, size);
+		if (!p)
+			return SEQ_SKIP;
 		res = PTR_ERR(p);
 		if (!IS_ERR(p)) {
 			char *end = mangle_path(buf, p, esc);
@@ -474,7 +501,7 @@ int seq_path_root(struct seq_file *m, struct path *path, struct path *root,
 	}
 	seq_commit(m, res);
 
-	return res < 0 ? res : 0;
+	return res < 0 && res != -ENAMETOOLONG ? res : 0;
 }
 
 /*

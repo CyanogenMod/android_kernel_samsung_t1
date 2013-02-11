@@ -37,6 +37,17 @@
 #include "dss.h"
 #include "dss_features.h"
 
+/*
+ * Estimated available DSS bandwidth on L3@OPP50 is ~800MB/s.
+ * It is approximately 3 WXGA layers or almost 1.5 FullHD layers at 60fps rate.
+ */
+#define OVERLAY_AREA_BW_THRESHOLD (1280*800*3)
+
+static DEFINE_MUTEX(overlay_bw_mutex);
+static bool overlay_bw_requested;
+static struct device dummy_overlay_dev = {
+	.init_name = "omap_dss_overlay_dev",
+};
 static int num_overlays;
 static struct list_head overlay_list;
 
@@ -526,6 +537,8 @@ static struct kobj_type overlay_ktype = {
 int dss_check_overlay(struct omap_overlay *ovl, struct omap_dss_device *dssdev)
 {
 	struct omap_overlay_info *info;
+	struct omap_writeback_info wb_info;
+	struct omap_writeback *wb;
 	u16 outw, outh;
 	u16 dw, dh;
 
@@ -542,7 +555,16 @@ int dss_check_overlay(struct omap_overlay *ovl, struct omap_dss_device *dssdev)
 		return -EINVAL;
 	}
 
-	dssdev->driver->get_resolution(dssdev, &dw, &dh);
+	wb = omap_dss_get_wb(0);
+
+	wb->get_wb_info(wb, &wb_info);
+
+	if (wb && wb_info.enabled && wb_info.mode == OMAP_WB_MEM2MEM_MODE &&
+					ovl->manager->id == wb_info.source) {
+		dw = wb_info.width;
+		dh = wb_info.height;
+	} else
+		dssdev->driver->get_resolution(dssdev, &dw, &dh);
 
 	DSSDBG("check_overlay %d: (%d,%d %dx%d -> %dx%d) disp (%dx%d)\n",
 			ovl->id,
@@ -566,16 +588,18 @@ int dss_check_overlay(struct omap_overlay *ovl, struct omap_dss_device *dssdev)
 			outh = info->out_height;
 	}
 
-	if (dw < info->pos_x + outw) {
-		DSSDBG("check_overlay failed 1: %d < %d + %d\n",
-				dw, info->pos_x, outw);
-		return -EINVAL;
-	}
+	if (!info->wb_source) {
+		if (dw < info->pos_x + outw) {
+			DSSDBG("check_overlay failed 1: %d < %d + %d\n",
+					dw, info->pos_x, outw);
+			return -EINVAL;
+		}
 
-	if (dh < info->pos_y + outh) {
-		DSSDBG("check_overlay failed 2: %d < %d + %d\n",
-				dh, info->pos_y, outh);
-		return -EINVAL;
+		if (dh < info->pos_y + outh) {
+			DSSDBG("check_overlay failed 2: %d < %d + %d\n",
+					dh, info->pos_y, outh);
+			return -EINVAL;
+		}
 	}
 
 	if ((ovl->supported_modes & info->color_mode) == 0) {
@@ -589,6 +613,21 @@ int dss_check_overlay(struct omap_overlay *ovl, struct omap_dss_device *dssdev)
 		return -EINVAL;
 	}
 
+	/* OMAP44xx limitation: in Stallmode, when the frame pixel size
+	 * is less than output SyncFifo depth(16) DISPC hangs without
+	 * sending any data. Observation is: when width/height less than 4/5
+	 * no FRAMEDONE INQ ever received for such frame
+	 */
+	if ((info->width < 4 || info->height < 5) &&
+		info->color_mode == OMAP_DSS_COLOR_NV12 ||
+		info->color_mode == OMAP_DSS_COLOR_YUV2 ||
+		info->color_mode == OMAP_DSS_COLOR_UYVY)
+		if (dssdev->type == OMAP_DISPLAY_TYPE_DSI &&
+			dssdev->phy.dsi.type == OMAP_DSS_DSI_TYPE_CMD_MODE &&
+			cpu_is_omap44xx())  {
+			DSSWARN("too small frame on VID%d dropped\n", ovl->id);
+			return -EINVAL;
+		}
 	return 0;
 }
 
@@ -681,6 +720,32 @@ struct omap_overlay *omap_dss_get_overlay(int num)
 	return NULL;
 }
 EXPORT_SYMBOL(omap_dss_get_overlay);
+
+void omap_dss_overlay_ensure_bw(void)
+{
+	long unsigned total_area;
+	struct omap_overlay *ovl;
+
+	mutex_lock(&overlay_bw_mutex);
+
+	total_area = 0;
+	list_for_each_entry(ovl, &overlay_list, list) {
+		if (ovl->info.enabled)
+			total_area += ovl->info.width * ovl->info.height;
+	}
+
+	if (!overlay_bw_requested &&
+			(total_area > OVERLAY_AREA_BW_THRESHOLD)) {
+		omap_dss_request_high_bandwidth(&dummy_overlay_dev);
+		overlay_bw_requested = true;
+	} else if (overlay_bw_requested &&
+			(total_area <= OVERLAY_AREA_BW_THRESHOLD)) {
+		omap_dss_reset_high_bandwidth(&dummy_overlay_dev);
+		overlay_bw_requested = false;
+	}
+
+	mutex_unlock(&overlay_bw_mutex);
+}
 
 static void omap_dss_add_overlay(struct omap_overlay *overlay)
 {

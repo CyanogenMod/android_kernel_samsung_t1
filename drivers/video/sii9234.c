@@ -1691,7 +1691,7 @@ static void sii9234_detection_restart(struct work_struct *work)
 
 	sii9234->state = STATE_DISCONNECTED;
 	sii9234->pdata->power(0);
-
+	sii9234->pdata->enable_adc_change();
 	if (sii9234_detection_init(sii9234) == MHL_CON_UNHANDLED) {
 		pr_info("sii9234: redetection failed\n");
 #ifdef CONFIG_USB_SWITCH_FSA9480

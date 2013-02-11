@@ -267,43 +267,6 @@ struct omap_vdd_dvfs_info *_voltdm_to_dvfs_info(struct voltagedomain *voltdm)
 	return NULL;
 }
 
-/**
- * _volt_to_opp() - Find OPP corresponding to a given voltage
- * @dev:	device pointer associated with the OPP list
- * @volt:	voltage to search for in uV
- *
- * Searches for exact match in the OPP list and returns handle to the matching
- * OPP if found, else return the max available OPP.
- * If there are multiple opps with same voltage, it will return
- * the first available entry. Return pointer should be checked against IS_ERR.
- *
- * NOTE: since this uses OPP functions, use under rcu_lock. This function also
- * assumes that the cpufreq table and OPP table are in sync - any modifications
- * to either should be synchronized.
- */
-static struct opp *_volt_to_opp(struct device *dev, unsigned long volt)
-{
-	struct opp *opp = ERR_PTR(-ENODEV);
-	unsigned long f = 0;
-
-	do {
-		opp = opp_find_freq_ceil(dev, &f);
-		if (IS_ERR(opp)) {
-			/*
-			 * if there is no OPP for corresponding volt
-			 * then return max available instead
-			 */
-			opp = opp_find_freq_floor(dev, &f);
-			break;
-		}
-		if (opp_get_voltage(opp) >= volt)
-			break;
-		f++;
-	} while (1);
-
-	return opp;
-}
-
 /* rest of the helper functions */
 /**
  * _add_vdd_user() - Add a voltage request
@@ -529,7 +492,7 @@ static int _remove_freq_request(struct omap_vdd_dvfs_info *dvfs_info,
  *
  * This runs down the table provided to find the match for main_volt
  * provided and sets up a scale request for the dependent domain
- * for the dependent voltage.
+ * for the dependent OPP.
  *
  * Returns 0 if all went well.
  */
@@ -541,7 +504,7 @@ static int _dep_scan_table(struct device *dev,
 	struct omap_vdd_dvfs_info *tdvfs_info;
 	struct opp *opp;
 	int i, ret;
-	unsigned long dep_volt = 0, new_freq = 0;
+	unsigned long dep_volt = 0, new_dep_volt, new_freq = 0;
 
 	if (!dep_table) {
 		dev_err(dev, "%s: deptable not present for vdd%s\n",
@@ -572,14 +535,6 @@ static int _dep_scan_table(struct device *dev,
 		}
 	}
 
-	/* See if dep_volt is possible for the vdd*/
-	ret = _add_vdd_user(_voltdm_to_dvfs_info(dep_info->_dep_voltdm),
-			dev, dep_volt);
-	if (ret)
-		dev_err(dev, "%s: Failed to add dep to domain %s volt=%ld\n",
-				__func__, dep_info->name, dep_volt);
-
-	/* And also add corresponding freq request */
 	tdvfs_info = _voltdm_to_dvfs_info(dep_info->_dep_voltdm);
 	if (!tdvfs_info) {
 		dev_warn(dev, "%s: no dvfs_info\n",
@@ -593,20 +548,51 @@ static int _dep_scan_table(struct device *dev,
 		return -ENODEV;
 	}
 
+	new_dep_volt = dep_volt;
 	rcu_read_lock();
-	opp = _volt_to_opp(target_dev, dep_volt);
+
+	/*
+	 * To obey OPP dependencies a dependent domain
+	 * should be scaled to OPP which is not lower than requested.
+	 * If such OPP is not found it means OPP tables are messed-up.
+	 * Don't fall back to floor OPP, because it will violate
+	 * OPP dependency and make system unstable.
+	 * Just throw an error and return.
+	 */
+	opp = opp_find_volt_ceil(target_dev, &new_dep_volt);
 	if (!IS_ERR(opp))
 		new_freq = opp_get_freq(opp);
 	rcu_read_unlock();
 
-	if (new_freq) {
-		ret = _add_freq_request(tdvfs_info, dev, target_dev, new_freq);
-		if (ret) {
-			dev_err(target_dev, "%s: freqadd(%s) failed %d[f=%ld,"
-					"v=%ld]\n", __func__, dev_name(dev),
-					i, new_freq, dep_volt);
-			return ret;
-		}
+	if (!new_dep_volt || !new_freq) {
+		dev_err(target_dev, "%s: no valid ceil OPP for voltage %lu\n",
+				__func__, dep_volt);
+		return -ENODATA;
+	}
+
+	/* TODO: In case of _add_vdd_user() failure
+	 * _dep_scan_table() will end up with previous voltage request,
+	 * but without a frequency request.
+	 * System should be left in previous state in case of failure.
+	 * Same issue is present in omap_device_scale() function.
+	 */
+	ret = _add_freq_request(tdvfs_info, dev, target_dev, new_freq);
+	if (ret) {
+		dev_err(target_dev, "%s: freqadd(%s) failed %d"
+				"[f=%ld, v=%ld(%ld)]\n",
+				__func__, dev_name(dev), ret, new_freq,
+				new_dep_volt, dep_volt);
+		return ret;
+	}
+
+	ret = _add_vdd_user(tdvfs_info, dev, new_dep_volt);
+	if (ret) {
+		dev_err(target_dev, "%s: vddadd(%s) failed %d"
+				"[f=%ld, v=%ld(%ld)]\n",
+				__func__, dev_name(dev), ret, new_freq,
+				new_dep_volt, dep_volt);
+		_remove_freq_request(tdvfs_info, dev, target_dev);
+		return ret;
 	}
 
 	return ret;
@@ -735,6 +721,7 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 	struct omap_vdd_info *vdd;
 	struct omap_volt_data *new_vdata;
 	struct omap_volt_data *curr_vdata;
+	struct list_head *dev_list;
 
 	voltdm = tdvfs_info->voltdm;
 	if (IS_ERR_OR_NULL(voltdm)) {
@@ -781,8 +768,17 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 		}
 	}
 
-	/* Now decide on switching OPP */
+	if (voltdm->abb && omap_get_nominal_voltage(new_vdata) >
+			omap_get_nominal_voltage(curr_vdata)) {
+		ret = omap_ldo_abb_pre_scale(voltdm, new_vdata);
+		if (ret) {
+			pr_err("%s: ABB prescale failed for vdd%s: %d\n",
+			__func__, voltdm->name, ret);
+			goto fail;
+		}
+	}
 
+	/* Now decide on switching OPP */
 	if (curr_volt == new_volt) {
 		volt_scale_dir = DVFS_VOLT_SCALE_NONE;
 	} else if (curr_volt < new_volt) {
@@ -796,13 +792,32 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 		volt_scale_dir = DVFS_VOLT_SCALE_UP;
 	}
 
-	/* Move all devices in list to the required frequencies */
-	list_for_each_entry(temp_dev, &tdvfs_info->dev_list, node) {
+	if (voltdm->abb && omap_get_nominal_voltage(new_vdata) >
+			omap_get_nominal_voltage(curr_vdata)) {
+		ret = omap_ldo_abb_post_scale(voltdm, new_vdata);
+		if (ret) {
+			pr_err("%s: ABB prescale failed for vdd%s: %d\n",
+			__func__, voltdm->name, ret);
+			goto fail;
+		}
+	}
+
+	/*
+	 * Move all devices in list to the required frequencies.
+	 * Devices are put in list in strict order, such as, when
+	 * scaling up to higher OPP, dependent frequencies will be scaled
+	 * after the frequency on which they depend. In case of scaling
+	 * down to lower OPP the order of scaling frequencies is reverse.
+	 */
+	dev_list = (volt_scale_dir == DVFS_VOLT_SCALE_DOWN) ?
+			tdvfs_info->dev_list.prev : tdvfs_info->dev_list.next;
+	while (dev_list != &tdvfs_info->dev_list) {
 		struct device *dev;
 		struct opp *opp;
 		unsigned long freq = 0;
 		int r;
 
+		temp_dev = list_entry(dev_list, struct omap_vdd_dev_list, node);
 		dev = temp_dev->dev;
 		if (!plist_head_empty(&temp_dev->freq_user_list)) {
 			node = plist_last(&temp_dev->freq_user_list);
@@ -815,20 +830,36 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 			 * if there are none pending
 			 */
 			if (target_dev == dev) {
+				unsigned long tmp_volt = new_volt;
 				rcu_read_lock();
-				opp = _volt_to_opp(dev, new_volt);
+				/*
+				 * At this point voltage level is already
+				 * determined and it won't change.
+				 * So we should find OPP with equal or lower
+				 * voltage. Otherwise frequency may be too high
+				 * for voltage that is already set (or going
+				 * to be set) and system will become unstable.
+				 * If there is no such OPP then OPP tables are
+				 * messed up and should be fixed.
+				 * Better throw an error and skip this device.
+				 */
+				opp = opp_find_volt_floor(dev, &tmp_volt);
 				if (!IS_ERR(opp))
 					freq = opp_get_freq(opp);
+				else
+					dev_err(dev, "%s: no valid floor OPP "
+							"for voltage %lu\n",
+							__func__, tmp_volt);
 				rcu_read_unlock();
 			}
 			if (!freq)
-				continue;
+				goto next;
 		}
 
 		if (freq == clk_get_rate(temp_dev->clk)) {
 			dev_dbg(dev, "%s: Already at the requested"
 				"rate %ld\n", __func__, freq);
-			continue;
+			goto next;
 		}
 
 		r = clk_set_rate(temp_dev->clk, freq);
@@ -837,18 +868,46 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 				__func__, freq, r);
 			ret = r;
 		}
+next:
+		dev_list = (volt_scale_dir == DVFS_VOLT_SCALE_DOWN) ?
+				dev_list->prev : dev_list->next;
 	}
 
 	if (ret)
 		goto fail;
 
+	if (voltdm->abb && omap_get_nominal_voltage(new_vdata) <
+			omap_get_nominal_voltage(curr_vdata)) {
+		ret = omap_ldo_abb_pre_scale(voltdm, new_vdata);
+		if (ret) {
+			pr_err("%s: ABB prescale failed for vdd%s: %d\n",
+			__func__, voltdm->name, ret);
+			goto fail;
+		}
+	}
+
 	if (DVFS_VOLT_SCALE_DOWN == volt_scale_dir)
 		voltdm_scale(voltdm, new_vdata);
+
+	if (voltdm->abb && omap_get_nominal_voltage(new_vdata) <
+			omap_get_nominal_voltage(curr_vdata)) {
+		ret = omap_ldo_abb_post_scale(voltdm, new_vdata);
+		if (ret)
+			pr_err("%s: ABB postscale failed for vdd%s: %d\n",
+			__func__, voltdm->name, ret);
+	}
 
 	/* Make a decision to scale dependent domain based on nominal voltage */
 	if (omap_get_nominal_voltage(new_vdata) <
 			omap_get_nominal_voltage(curr_vdata)) {
 		_dep_scale_domains(target_dev, vdd);
+	}
+
+	/* Ensure that current voltage data pointer points to new volt */
+	if (curr_volt == new_volt && omap_get_nominal_voltage(new_vdata) !=
+			omap_get_nominal_voltage(curr_vdata)) {
+		voltdm->curr_volt = new_vdata;
+		omap_vp_update_errorgain(voltdm, new_vdata);
 	}
 
 	/* All clear.. go out gracefully */
@@ -886,7 +945,7 @@ int omap_device_scale(struct device *req_dev, struct device *target_dev,
 			unsigned long rate)
 {
 	struct opp *opp;
-	unsigned long volt, freq = rate, new_freq = 0;
+	unsigned long volt, freq = rate;
 	struct omap_vdd_dvfs_info *tdvfs_info;
 	struct platform_device *pdev;
 	struct omap_device *od;
@@ -972,20 +1031,37 @@ int omap_device_scale(struct device *req_dev, struct device *target_dev,
 	}
 
 	if (dev != target_dev) {
+		unsigned long tmp_volt = volt, new_freq = 0;
 		rcu_read_lock();
-		opp = _volt_to_opp(dev, volt);
+		/*
+		 * At this point voltage level is already
+		 * determined and requested.
+		 * So we should find OPP with equal or lower voltage.
+		 * Otherwise frequency may be too high for voltage
+		 * that is going to be set and system will become unstable.
+		 * If there is no such OPP then OPP tables are
+		 * messed up and should be fixed.
+		 * Just throw an error and abort scaling.
+		 */
+		opp = opp_find_volt_floor(dev, &tmp_volt);
 		if (!IS_ERR(opp))
 			new_freq = opp_get_freq(opp);
+		else
+			dev_err(dev, "%s: no valid floor OPP for voltage %lu\n",
+					__func__, tmp_volt);
 		rcu_read_unlock();
-		if (new_freq) {
-			ret = _add_freq_request(tdvfs_info, req_dev, dev,
-						new_freq);
-			if (ret) {
-				dev_err(target_dev, "%s: freqadd(%s) failed %d"
-					"[f=%ld, v=%ld]\n", __func__,
-					dev_name(req_dev), ret, freq, volt);
-				goto out;
-			}
+
+		if (!new_freq) {
+			ret = (IS_ERR(opp)) ? PTR_ERR(opp) : -ENODEV;
+			goto out;
+		}
+		ret = _add_freq_request(tdvfs_info, req_dev, dev,
+					new_freq);
+		if (ret) {
+			dev_err(target_dev, "%s: freqadd(%s) failed %d"
+				"[f=%ld, v=%ld]\n", __func__,
+				dev_name(req_dev), ret, freq, volt);
+			goto out;
 		}
 	}
 

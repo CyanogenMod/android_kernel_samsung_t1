@@ -29,16 +29,6 @@
 #include <linux/gpio.h>
 #include <linux/input.h>
 
-unsigned int mclk_gpio;
-
-static void set_mclk(bool on)
-{
-	if (on)
-		gpio_set_value(mclk_gpio, 1);
-	else
-		gpio_set_value(mclk_gpio, 0);
-}
-
 static int wm8994_read(struct wm8994 *wm8994, unsigned short reg,
 		       int bytes, void *dest)
 {
@@ -382,6 +372,14 @@ static int wm8994_device_suspend(struct device *dev)
 	 */
 	wm8994_reg_write(wm8994, WM8994_SOFTWARE_RESET, 0x8994);
 
+	/* Restore GPIO registers to prevent problems with mismatched
+	 * pin configurations.
+	 */
+	ret = wm8994_write(wm8994, WM8994_GPIO_1, WM8994_NUM_GPIO_REGS * 2,
+			   &wm8994->gpio_regs);
+	if (ret < 0)
+		dev_err(dev, "Failed to restore GPIO registers: %d\n", ret);
+
 	wm8994->suspended = true;
 
 	ret = regulator_bulk_disable(wm8994->num_supplies,
@@ -391,8 +389,6 @@ static int wm8994_device_suspend(struct device *dev)
 		return ret;
 	}
 
-	set_mclk(0);
-
 	return 0;
 }
 
@@ -400,8 +396,6 @@ static int wm8994_device_resume(struct device *dev)
 {
 	struct wm8994 *wm8994 = dev_get_drvdata(dev);
 	int ret, i;
-
-	set_mclk(1);
 
 	/* We may have lied to the PM core about suspending */
 	if (!wm8994->suspended)
@@ -529,7 +523,7 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		break;
 	default:
 		BUG();
-		goto err_supplies;
+		goto err;
 	}
 
 	ret = regulator_bulk_get(wm8994->dev, wm8994->num_supplies,
@@ -560,6 +554,18 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 			dev_warn(wm8994->dev, "Device registered as type %d\n",
 				 wm8994->type);
 		wm8994->type = WM1811;
+
+		/* Samsung-specific customization of MICBIAS levels */
+		wm8994_reg_write(wm8994, 0x102, 0x3);
+		wm8994_reg_write(wm8994, 0xcb, 0x5151);
+		wm8994_reg_write(wm8994, 0xd3, 0x3f3f);
+		wm8994_reg_write(wm8994, 0xd4, 0x3f3f);
+		wm8994_reg_write(wm8994, 0xd5, 0x3f3f);
+		wm8994_reg_write(wm8994, 0xd6, 0x3226);
+		wm8994_reg_write(wm8994, 0x102, 0x0);
+		wm8994_reg_write(wm8994, 0xd1, 0x87);
+		wm8994_reg_write(wm8994, 0x3b, 0x9);
+		wm8994_reg_write(wm8994, 0x3c, 0x2);
 		break;
 	case 0x8994:
 		devname = "WM8994";
@@ -664,9 +670,6 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 
 	pm_runtime_enable(wm8994->dev);
 	pm_runtime_resume(wm8994->dev);
-
-	mclk_gpio = pdata->mclk_pin;
-	set_mclk(1);
 
 	return 0;
 

@@ -373,12 +373,27 @@ EXPORT_SYMBOL(mark_page_accessed);
 
 void __lru_cache_add(struct page *page, enum lru_list lru)
 {
+#ifndef CONFIG_CMA
 	struct pagevec *pvec = &get_cpu_var(lru_add_pvecs)[lru];
 
 	page_cache_get(page);
 	if (!pagevec_add(pvec, page))
 		____pagevec_lru_add(pvec, lru);
 	put_cpu_var(lru_add_pvecs);
+#else
+	struct pagevec *pvec;
+	int is_cma;
+
+	/* FIXME: too slow */
+	is_cma = is_cma_pageblock(page);
+
+	pvec = &get_cpu_var(lru_add_pvecs)[lru];
+
+	page_cache_get(page);
+	if (!pagevec_add(pvec, page) || is_cma)
+		____pagevec_lru_add(pvec, lru);
+	put_cpu_var(lru_add_pvecs);
+#endif
 }
 EXPORT_SYMBOL(__lru_cache_add);
 
@@ -667,7 +682,7 @@ void lru_add_page_tail(struct zone* zone,
 	VM_BUG_ON(!PageHead(page));
 	VM_BUG_ON(PageCompound(page_tail));
 	VM_BUG_ON(PageLRU(page_tail));
-	VM_BUG_ON(!spin_is_locked(&zone->lru_lock));
+	VM_BUG_ON(NR_CPUS != 1 && !spin_is_locked(&zone->lru_lock));
 
 	SetPageLRU(page_tail);
 

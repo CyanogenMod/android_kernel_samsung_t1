@@ -1216,7 +1216,11 @@ static inline struct page *shmem_swapin(swp_entry_t entry, gfp_t gfp,
 static inline struct page *shmem_alloc_page(gfp_t gfp,
 			struct shmem_inode_info *info, unsigned long idx)
 {
+#ifdef CONFIG_CMA
+	return alloc_page(gfp & ~__GFP_MOVABLE);
+#else
 	return alloc_page(gfp);
+#endif
 }
 #endif /* CONFIG_NUMA */
 
@@ -2348,13 +2352,11 @@ static struct dentry *shmem_fh_to_dentry(struct super_block *sb,
 {
 	struct inode *inode;
 	struct dentry *dentry = NULL;
-	u64 inum;
+	u64 inum = fid->raw[2];
+	inum = (inum << 32) | fid->raw[1];
 
 	if (fh_len < 3)
 		return NULL;
-
-	inum = fid->raw[2];
-	inum = (inum << 32) | fid->raw[1];
 
 	inode = ilookup5(sb, (unsigned long)(inum + fid->raw[0]),
 			shmem_match, fid->raw);

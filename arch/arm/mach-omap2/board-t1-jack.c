@@ -47,7 +47,8 @@ static struct sec_jack_zone sec_jack_zones[] = {
 		.jack_type	= SEC_HEADSET_3POLE,
 	},
 	{
-		/* 350 < adc <= 759, unstable zone, default to 3pole if it stays
+		/* 350 < adc <= 759, unstable zone,
+		* default to 3pole if it stays
 		* in this range for a second (10ms delays, 20 samples)
 		*/
 		.adc_high	= 759,
@@ -87,29 +88,28 @@ static struct sec_jack_zone sec_jack_zones[] = {
 /* To support 3-buttons earjack */
 static struct sec_jack_buttons_zone sec_jack_buttons_zones[] = {
 	{
-		/* 0 <= adc <= 129, stable zone */
+		/* 0 <= adc <= 111, stable zone */
 		.code		= KEY_MEDIA,
 		.adc_low	= 0,
-		.adc_high	= 129,
+		.adc_high	= 111,
 	},
 	{
-		/* 130 <= adc <= 260, stable zone */
-		.code		= KEY_PREVIOUSSONG,
-		.adc_low	= 130,
-		.adc_high	= 260,
+		/* 112 <= adc <= 251, stable zone */
+		.code		= KEY_VOLUMEUP,
+		.adc_low	= 112,
+		.adc_high	= 251,
 	},
 	{
-		/* 261 <= adc <= 650, stable zone */
-		.code		= KEY_NEXTSONG,
-		.adc_low	= 261,
-		.adc_high	= 650,
+		/* 252 <= adc <= 540, stable zone */
+		.code		= KEY_VOLUMEDOWN,
+		.adc_low	= 252,
+		.adc_high	= 540,
 	},
 };
 
 static int sec_jack_get_adc_value(void)
 {
 	int value;
-
 	value =  twl6030_get_madc_conversion(ADC_CHANNEL_JACK);
 	return (int)(1800*value) / 1024;
 }

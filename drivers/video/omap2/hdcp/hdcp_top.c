@@ -589,7 +589,7 @@ static void hdcp_irq_cb(int status)
  */
 static long hdcp_enable_ctl(void __user *argp)
 {
-	printk(KERN_WARNING "hdcp_ioctl() - ENABLE \n");
+	DBG("hdcp_ioctl() - ENABLE %u", jiffies_to_msecs(jiffies));
 
 	if (hdcp.en_ctrl == 0) {
 		hdcp.en_ctrl =
@@ -610,11 +610,13 @@ static long hdcp_enable_ctl(void __user *argp)
 				    "- enable ioctl\n");
 		return -EFAULT;
 	}
+
 	hdcp.hdcp_keys_loaded = true;
-	
+
 	/* Post event to workqueue */
 	if (hdcp_submit_work(HDCP_ENABLE_CTL, 0) == 0)
 		return -EFAULT;
+
 
 	return 0;
 }
