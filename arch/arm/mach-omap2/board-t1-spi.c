@@ -18,38 +18,35 @@
 
 #include "mux.h"
 #include "omap_muxtbl.h"
+#include "omap44xx_muxtbl.h"
 
 #include <linux/phone_svn/ipc_spi.h>
 #include <plat/mcspi.h>
 #include <linux/irq.h>
 #include <linux/spi/spi.h>
 
-static struct ipc_spi_platform_data ipc_spi_data;
+static struct ipc_spi_platform_data spi_modem_data;
 
-static struct omap2_mcspi_device_config board_ipc_spi_mcspi_config = {
+static struct omap2_mcspi_device_config board_spi_mcspi_config = {
 	.turbo_mode =	1,
 	.single_channel = 1,
 };
 
-static struct spi_board_info espresso_omap4_spi_board_info[] __initdata = {
+static struct spi_board_info t1_omap4_spi_board_info[] __initdata = {
 	[0] = {
-		.modalias = "ipc_spi",
+		.modalias = "if_spi_driver",
 		.bus_num = 1,
 		.chip_select = 0,
 		.max_speed_hz = 12000000,
-		.controller_data = &board_ipc_spi_mcspi_config,
+		.controller_data = &board_spi_mcspi_config,
 	},
 };
 
-static struct ipc_spi_platform_data ipc_spi_data = {
-	.name = "board_spi"
-};
-
-static struct platform_device ipc_spi = {
-	.name = "onedram",
+static struct platform_device spi_modem = {
+	.name = "if_spi_platform_driver",
 	.id = -1,
 	.dev = {
-		.platform_data = &ipc_spi_data,
+		.platform_data = &spi_modem_data,
 	},
 };
 
@@ -79,7 +76,37 @@ struct gpio spi_gpios[] __initdata = {
 	 }
 };
 
-static void __init ipc_spi_cfg_gpio(void)
+static void __init omap_spi_none_pads_cfg_mux(void)
+{
+	int i;
+	struct omap_mux_partition *partition;
+	struct omap_mux_partition *core = omap_mux_get("core");
+	struct omap_mux_partition *wkup = omap_mux_get("wkup");
+	struct omap_muxtbl *tbl;
+	char *none_pins[] = {
+		"mcspi1_clk",
+		"mcspi1_somi",
+		"mcspi1_simo",
+	};
+
+	for (i = 0; i < ARRAY_SIZE(none_pins); i++) {
+		tbl = omap_muxtbl_find_by_name(none_pins[i]);
+		if (!tbl)
+			continue;
+		if (tbl->domain == OMAP4_MUXTBL_DOMAIN_WKUP)
+			partition = wkup;
+		else
+			partition = core;
+
+		omap_mux_write(partition,
+			OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+			tbl->mux.reg_offset);
+	}
+
+	pr_info("[SPI] %s\n", __func__);
+}
+
+static void __init spi_modem_cfg_gpio(void)
 {
 	int i;
 
@@ -88,23 +115,27 @@ static void __init ipc_spi_cfg_gpio(void)
 			omap_muxtbl_get_gpio_by_name(spi_gpios[i].label);
 	gpio_request_array(spi_gpios, ARRAY_SIZE(spi_gpios));
 
-	ipc_spi_data.gpio_ipc_mrdy = spi_gpios[GPIO_AP_CP_MRDY].gpio;
-	ipc_spi_data.gpio_ipc_srdy = spi_gpios[GPIO_AP_CP_SRDY].gpio;
-	ipc_spi_data.gpio_ipc_sub_mrdy = spi_gpios[GPIO_AP_CP_SUB_MRDY].gpio;
-	ipc_spi_data.gpio_ipc_sub_srdy = spi_gpios[GPIO_AP_CP_SUB_SRDY].gpio;
+	spi_modem_data.gpio_ipc_mrdy = spi_gpios[GPIO_AP_CP_MRDY].gpio;
+	spi_modem_data.gpio_ipc_srdy = spi_gpios[GPIO_AP_CP_SRDY].gpio;
+	spi_modem_data.gpio_ipc_sub_mrdy = spi_gpios[GPIO_AP_CP_SUB_MRDY].gpio;
+	spi_modem_data.gpio_ipc_sub_srdy = spi_gpios[GPIO_AP_CP_SUB_SRDY].gpio;
 
-	pr_debug("[IPC_SPI] %s done\n", __func__);
+	pr_info("[SPI] %s done\n", __func__);
 
 }
 
 static int __init init_spi(void)
 {
-	pr_debug("[IPC_SPI] %s\n", __func__);
-	ipc_spi_cfg_gpio();
-	platform_device_register(&ipc_spi);
+	pr_info("[SPI] %s\n", __func__);
+	spi_modem_cfg_gpio();
+	platform_device_register(&spi_modem);
 
-	spi_register_board_info(espresso_omap4_spi_board_info,
-		ARRAY_SIZE(espresso_omap4_spi_board_info));
+	spi_register_board_info(t1_omap4_spi_board_info,
+		ARRAY_SIZE(t1_omap4_spi_board_info));
+
+	if (sec_bootmode == 5)
+		omap_spi_none_pads_cfg_mux();
+
 	return 0;
 }
 
