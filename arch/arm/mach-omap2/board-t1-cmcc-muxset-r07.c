@@ -102,6 +102,57 @@ static struct omap_muxtbl muxtbl[] __initdata = {
 	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
 		UART3_TX_IRTX, OMAP_MUX_MODE3 | OMAP_PIN_INPUT_PULLDOWN,
 		144, "AP_FLM_TXD"),
+	/* [IN---] kpd_col2 - gpio_1 - USB_OTG_ID */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		KPD_COL2,
+		OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLUP |
+		OMAP_PIN_OFF_WAKEUPENABLE,
+		1, "USB_OTG_ID"),
+	/* [-N-C-] kpd_col3 - gpio_171 - USB_OTG_EN.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		KPD_COL3, 
+		OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		171, "USB_OTG_EN.nc"),
+	/* [-N-C-] sim_reset.gpio_wk2 - CP_RST.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_WKUP,
+		     SIM_RESET,
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     2, "CP_RST.nc"),		     
+	/* [-N-C-] fref_clk4_req.gpio_wk7 - NC */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_WKUP,
+		     FREF_CLK4_REQ, 
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     7, "fref_clk4_req.nc"),
+	/* [-N-C-] gpmc_ncs0.gpio_50 - RESET_REQ_N.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		     GPMC_NCS0,
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     50, "RESET_REQ_N.nc"),
+	/*  [-N-C-] gpmc_ncs2.gpio_52 - GPS_CNTL.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		     GPMC_NCS2, 
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     52, "GPS_CNTL.nc"),
+	/* [-N-C-] gpmc_nadv_ale.gpio_56 - CP_DUMP_INT.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		     GPMC_NADV_ALE, 
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     56, "CP_DUMP_INT.nc"),
+	/* [-N-C-] usbb1_ulpitll_stp.hsi1_cadata - MIPI_HSI_TX_DATA.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		     USBB1_ULPITLL_STP, 
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     85, "MIPI_HSI_TX_DATA.nc"),
+	/* [-N-C-] usbb1_ulpitll_nxt.hsi1_acready - MIPI_HSI_TX_RDY.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		     USBB1_ULPITLL_NXT,
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     87, "MIPI_HSI_TX_RDY.nc"),
+	/* [-N-C-] usbb2_hsic_data.gpio_169 - OTG_OUT_5V.nc */
+	OMAP4_MUXTBL(OMAP4_MUXTBL_DOMAIN_CORE,
+		     USBB2_HSIC_DATA, 
+		     OMAP_MUX_MODE7 | OMAP_PIN_INPUT_PULLDOWN,
+		     169, "OTG_OUT_5V.nc"),
 };
 
 add_sec_muxtbl_to_list(SEC_MACHINE_T1, 7, muxtbl);
