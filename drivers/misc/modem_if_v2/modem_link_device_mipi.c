@@ -232,6 +232,7 @@ static void mipi_hsi_tx_work(struct work_struct *work)
 			}  else {
 				mipi_debug("write Done\n");
 
+#if 0
 				if ((iod->format == IPC_FMT) ||
 						(iod->format == IPC_RFS))
 					print_hex_dump(KERN_DEBUG,
@@ -243,6 +244,7 @@ static void mipi_hsi_tx_work(struct work_struct *work)
 							fmt_skb->len <= 16 ?
 							(size_t)fmt_skb->len :
 							(size_t)16, false);
+#endif
 			}
 
 			dev_kfree_skb_any(fmt_skb);
@@ -1580,6 +1582,7 @@ static void if_hsi_read_done(struct hsi_device *dev, unsigned int size)
 				channel->channel_id, channel->packet_size);
 		}
 
+#if 0
 		if ((iod->format == IPC_FMT) ||
 					(iod->format == IPC_RFS))
 			print_hex_dump(KERN_DEBUG,
@@ -1591,6 +1594,7 @@ static void if_hsi_read_done(struct hsi_device *dev, unsigned int size)
 					channel->packet_size <= 16 ?
 					(size_t)channel->packet_size :
 					(size_t)16, false);
+#endif
 
 		channel->packet_size = 0;
 
