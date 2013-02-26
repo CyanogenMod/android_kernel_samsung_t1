@@ -298,13 +298,13 @@ static const u8 *mxt224_config[] = {
 #define MXT224E_BLEN_CHRG			0
 #define MXT224E_BLEN_CHRG_ERR2			0
 
-#define MXT224E_THRESHOLD_BATT			27
-#define MXT224E_THRESHOLD_BATT_ERR		30
+#define MXT224E_THRESHOLD_BATT			35  /* samsung value 27 */
+#define MXT224E_THRESHOLD_BATT_ERR		40  /* samsung value 30 */
 #define MXT224E_THRESHOLD_CHRG			40
 #define MXT224E_THRESHOLD_CHRG_ERR1		42
 #define MXT224E_THRESHOLD_CHRG_ERR2		45
 
-#define MXT224E_MOVFILTER_BATT			81
+#define MXT224E_MOVFILTER_BATT			47  /* samsung value 81 */
 #define MXT224E_MOVFILTER_BATT_ERR		81
 #define MXT224E_MOVFILTER_CHRG			47
 #define MXT224E_MOVFILTER_CHRG_ERR1		80
@@ -326,9 +326,9 @@ static const u8 *mxt224_config[] = {
 #define MXT224E_NEXTTCHDI_CHRG			0
 
 #define MXT224E_ACTVSYNCSPERX_BATT		10  /* samsung value 28 */
-#define MXT224E_ACTVSYNCSPERX_CHRG		40
-#define MXT224E_ACTVSYNCSPERX_CHRG_ERR1		45
-#define MXT224E_ACTVSYNCSPERX_CHRG_ERR2		48
+#define MXT224E_ACTVSYNCSPERX_CHRG		10  /* samsung value 40 */
+#define MXT224E_ACTVSYNCSPERX_CHRG_ERR1		15  /* samsung value 45 */
+#define MXT224E_ACTVSYNCSPERX_CHRG_ERR2		18  /* samsung value 48 */
 
 #define MXT224E_CALCFG_BATT			114
 #define MXT224E_CALCFG_BATT_ERR			114
@@ -337,7 +337,7 @@ static const u8 *mxt224_config[] = {
 #define MXT224E_BASEPREQ_BATT			0  /* samsung value 24 */
 #define MXT224E_BASEPREQ_BATT_ERR		10  /* samsung value 24 */
 #define MXT224E_BASEPREQ_CHRG			0
-#define MXT224E_BASEPREQ_CHRG_ERR2		15
+#define MXT224E_BASEPREQ_CHRG_ERR2		10  /* samsung value 15 */
 
 #define MXT224E_MFFREQ0_BATT			1
 #define MXT224E_MFFREQ0_BATT_ERR		1
@@ -409,7 +409,7 @@ static u8 t47_config_e[] = { PROCI_STYLUS_T47, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 static u8 t48_config_e[] = { PROCG_NOISESUPPRESSION_T48, 3, 132,
 			     MXT224E_CALCFG_BATT, MXT224E_BASEPREQ_BATT, 0, 0,
 			     0, 0, MXT224E_MFFREQ0_BATT, MXT224E_MFFREQ1_BATT,
-			     0, 0, 0, 24, 16, 0, 0, MXT224E_GCMAXADCSPERX_BATT,
+			     0, 0, 0, 6, 6, 0, 0, MXT224E_GCMAXADCSPERX_BATT,  /* samsung values 0, 0, 0, 24, 16 */
 			     4, MXT224E_GCLIMITMAX_BATT, 10, 0,
 			     MXT224E_MFINVLDDIFFTHR_BATT, 5, 0,
 			     MXT224E_MFERRORTHR0_BATT, 0, 5, 0, 0, 0, 0, 0, 0,
