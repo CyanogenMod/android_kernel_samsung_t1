@@ -32,8 +32,14 @@
 
 #define VIB_GPTIMER_NUM		10
 #define PWM_DUTY_MAX		1463
-#define MAX_TIMEOUT		10000 /* 10s */
-static unsigned long pwmval = 64;
+#define MAX_TIMEOUT			10000 /* 10s */
+
+#define LEVEL_MAX			127
+#define LEVEL_MIN			0
+#define LEVEL_DEFAULT		64
+#define LEVEL_THRESHOLD		96
+
+static unsigned long pwmval = LEVEL_DEFAULT;
 static unsigned long oldpwmval;
 
 static struct vibrator {
@@ -45,19 +51,19 @@ static struct vibrator {
 	unsigned gpio_en;
 } vibdata;
 
-static ssize_t pwmvalue_show(struct device *dev,
+static ssize_t pwm_value_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 
 	int count;
 
 	count = sprintf(buf, "%lu\n", pwmval);
-	pr_info("vibrator: pwmval: %lu\n", pwmval);
+	pr_info("vibrator: pwm value: %lu\n", pwmval);
 
 	return count;
 }
 
-ssize_t pwmvalue_store(struct device *dev,
+ssize_t pwm_value_store(struct device *dev,
 		struct device_attribute *attr,
 		const char *buf, size_t size)
 {
@@ -65,17 +71,74 @@ ssize_t pwmvalue_store(struct device *dev,
 	if (kstrtoul(buf, 0, &pwmval))
 		pr_err("vibrator: error in storing pwm value\n");
 
-	pr_info("vibrator: pwmval: %lu\n", pwmval);
+	pr_info("vibrator: pwm value: %lu\n", pwmval);
 
 	return size;
 }
-static DEVICE_ATTR(pwmvalue, S_IRUGO | S_IWUSR,
-		pwmvalue_show, pwmvalue_store);
+static DEVICE_ATTR(pwm_value, S_IRUGO | S_IWUSR,
+		pwm_value_show, pwm_value_store);
+
+static ssize_t pwm_max_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int count;
+
+	count = sprintf(buf, "%d\n", LEVEL_MAX);
+	pr_info("vibrator: pwm max value: %d\n", LEVEL_MAX);
+
+	return count;
+}
+
+static DEVICE_ATTR(pwm_max, S_IRUGO | S_IWUSR,
+		pwm_max_show, NULL);
+
+static ssize_t pwm_min_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int count;
+
+	count = sprintf(buf, "%d\n", LEVEL_MIN);
+	pr_info("vibrator: pwm min value: %d\n", LEVEL_MIN);
+
+	return count;
+}
+
+static DEVICE_ATTR(pwm_min, S_IRUGO | S_IWUSR,
+		pwm_min_show, NULL);
+
+static ssize_t pwm_default_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int count;
+
+	count = sprintf(buf, "%d\n", LEVEL_DEFAULT);
+	pr_info("vibrator: pwm default value: %d\n", LEVEL_DEFAULT);
+
+	return count;
+}
+
+static DEVICE_ATTR(pwm_default, S_IRUGO | S_IWUSR,
+		pwm_default_show, NULL);
+
+static ssize_t pwm_threshold_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int count;
+
+	count = sprintf(buf, "%d\n", LEVEL_THRESHOLD);
+	pr_info("vibrator: pwm threshold value: %d\n", LEVEL_THRESHOLD);
+
+	return count;
+}
+
+static DEVICE_ATTR(pwm_threshold, S_IRUGO | S_IWUSR,
+		pwm_threshold_show, NULL);
 
 static int pwm_set(unsigned long force)
 {
+	int pwm_duty;
+
 	pr_info("vibrator: pwm_set force=%lu\n", force);
-    int pwm_duty;
 
 	if (unlikely(vibdata.gptimer == NULL))
 		return -EINVAL;
@@ -105,26 +168,6 @@ static int pwm_set(unsigned long force)
 	return 0;
 }
 
-static int t1_create_vibrator_sysfs(void)
-{
-
-	int ret;
-	struct kobject *vibrator_kobj;
-	vibrator_kobj = kobject_create_and_add("vibrator", NULL);
-	if (unlikely(!vibrator_kobj))
-		return -ENOMEM;
-
-	ret = sysfs_create_file(vibrator_kobj,
-			&dev_attr_pwmvalue.attr);
-	if (unlikely(ret < 0)) {
-		pr_err("vibrator: sysfs_create_file failed: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
-
-}
-
 static void vibrator_off(void)
 {
 	if (!vibdata.enabled)
@@ -150,10 +193,10 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	mutex_lock(&vibdata.lock);
 
     /* make sure pwmval is between 0 and 127 */
-    if(pwmval > 127) {   
-        pwmval = 127;
-    } else if (pwmval < 0) {
-        pwmval = 0;
+    if(pwmval > LEVEL_MAX) {
+        pwmval = LEVEL_MAX;
+    } else if (pwmval < LEVEL_MIN) {
+        pwmval = LEVEL_MIN;
     }
 
     /* set the current pwmval */
@@ -166,7 +209,7 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 	hrtimer_cancel(&vibdata.timer);
 
 	if (value) {
-        pr_info("vibrator: value=%d, pwmval=%lu\n", value, pwmval);
+        pr_info("vibrator: value=%d, pwm value=%lu\n", value, pwmval);
 		wake_lock(&vibdata.wklock);
 
 		gpio_set_value(vibdata.gpio_en, 1);
@@ -232,14 +275,38 @@ static int __init vibrator_init(void)
 	wake_lock_init(&vibdata.wklock, WAKE_LOCK_SUSPEND, "vibrator");
 	mutex_init(&vibdata.lock);
 
-    t1_create_vibrator_sysfs();
-
 	ret = timed_output_dev_register(&to_dev);
 	if (ret < 0) {
         pr_err("vibrator_init(): failed to register timed_output device\n");
 		goto err_to_dev_reg;
-    }
-    
+	}
+
+    /* User controllable pwm level */
+	ret = device_create_file(to_dev.dev, &dev_attr_pwm_value);
+	if (ret < 0) {
+		pr_err("vibrator_init(): create sysfs fail: pwm_value\n");
+	}
+
+	ret = device_create_file(to_dev.dev, &dev_attr_pwm_max);
+	if (ret < 0) {
+		pr_err("vibrator_init(): create sysfs fail: pwm_max\n");
+	}
+
+	ret = device_create_file(to_dev.dev, &dev_attr_pwm_min);
+	if (ret < 0) {
+		pr_err("vibrator_init(): create sysfs fail: pwm_min\n");
+	}
+
+	ret = device_create_file(to_dev.dev, &dev_attr_pwm_default);
+	if (ret < 0) {
+		pr_err("vibrator_init(): create sysfs fail: pwm_default\n");
+	}
+
+	ret = device_create_file(to_dev.dev, &dev_attr_pwm_threshold);
+	if (ret < 0) {
+		pr_err("vibrator_init(): create sysfs fail: pwm_threshold\n");
+	}
+
 	return 0;
 
 err_to_dev_reg:
