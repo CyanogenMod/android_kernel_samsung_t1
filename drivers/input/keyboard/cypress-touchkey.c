@@ -79,10 +79,10 @@ struct cptk_data {
 	struct mutex    i2c_lock;
 	struct mutex    lock;
 	u8 led_status;
+	u8 notification_status;
 	u8 cur_firm_ver[3];
 	int touchkey_update_status;
 	bool enable;
-
 };
 
 static irqreturn_t cptk_irq_thread(int irq, void *data);
@@ -197,14 +197,21 @@ static int cptk_early_suspend(struct early_suspend *h)
 
 	disable_irq(cptk->client->irq);
 	mutex_lock(&cptk->lock);
-	if (cptk && cptk->pdata->power)
-		cptk->pdata->power(0);
-	cptk->enable = false;
+
+	if (cptk->notification_status == LED_OFF_CMD) {
+		cptk_i2c_write(cptk, KEYCODE_REG, LED_OFF_CMD);
+		cptk->led_status = LED_OFF_CMD;
+
+		if (cptk && cptk->pdata->power)
+			cptk->pdata->power(0);
+		cptk->enable = false;
+	}
 
 	/* releae key */
 	for (i = 1; i < cptk->pdata->keymap_size; i++)
 		input_report_key(cptk->input_dev,
 				 cptk->pdata->keymap[i], 0);
+
 	mutex_unlock(&cptk->lock);
 	return 0;
 }
@@ -420,6 +427,52 @@ static ssize_t touch_led_control(struct device *dev,
 static DEVICE_ATTR(brightness, S_IRUGO | S_IWUSR | S_IWGRP,
 						NULL, touch_led_control);
 
+
+static ssize_t touch_led_notification(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf,
+					size_t size)
+{
+	struct cptk_data *cptk = dev_get_drvdata(dev);
+	int data;
+	int ret;
+
+	mutex_lock(&cptk->lock);
+	ret = sscanf(buf, "%d\n", &data);
+	if (unlikely(ret != 1)) {
+		pr_err("cptk: %s err\n", __func__);
+		mutex_unlock(&cptk->lock);
+		return -EINVAL;
+	}
+
+	/* Power on */
+	if (cptk && cptk->pdata->power && cptk->enable == false) {
+		cptk->pdata->power(1);
+		cptk->enable = true;
+	}
+
+	if (data >= 1) {
+		/* LED on */
+		pr_info("cptk: touch_led_notification: LED ON");
+		cptk_i2c_write(cptk, KEYCODE_REG, LED_ON_CMD);
+        cptk->notification_status = LED_ON_CMD;
+	} else {
+		/* LED off */
+		pr_info("cptk: touch_led_notification: LED OFF");
+		if (cptk->led_status != LED_ON_CMD) {
+			cptk_i2c_write(cptk, KEYCODE_REG, LED_OFF_CMD);
+		}
+		cptk->notification_status = LED_OFF_CMD;
+	}
+
+	msleep(20);	/* To need a minimum 14ms. time at mode changing */
+	mutex_unlock(&cptk->lock);
+
+	return size;
+}
+static DEVICE_ATTR(notification, S_IRUGO | S_IWUSR | S_IWGRP,
+						NULL, touch_led_notification);
+
 static ssize_t touchkey_menu_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
@@ -580,6 +633,13 @@ static int cptk_create_sec_touchkey(struct cptk_data *cptk)
 	if (ret < 0) {
 		pr_err("cptk: Failed to create device file %s\n",
 				dev_attr_brightness.attr.name);
+		goto err;
+	}
+
+	ret = device_create_file(cptk->sec_touchkey, &dev_attr_notification);
+	if (ret < 0) {
+		pr_err("cptk: Failed to create device file %s\n",
+				dev_attr_notification.attr.name);
 		goto err;
 	}
 
