@@ -100,7 +100,7 @@ static struct gpio_event_direct_entry t1_gpio_keypad_keys_map_low[] = {
 		.code	= KEY_VOLUMEDOWN,
 	},
 	[GPIO_HOME_KEY] = {
-		.code	= KEY_HOME,
+		.code	= KEY_HOMEPAGE,
 	},
 };
 
